@@ -1,0 +1,31 @@
+# Repository Guidelines
+
+## 项目结构
+
+本项目是使用 `uv` 管理的 Python {{ python_version }} FastAPI 服务。
+`{{ package_name }}/main.py` 创建应用，`{{ package_name }}/api/v1/` 存放 API，
+`{{ package_name }}/core/` 存放配置和日志，`{{ package_name }}/db/` 管理数据库
+会话，`{{ package_name }}/models/` 存放 SQLAlchemy 模型。
+
+## 常用命令
+
+- `uv sync`
+- `cp .env.example .env`
+- `uv run uvicorn {{ package_name }}.main:app --reload`
+- `uv run pytest`
+- `uv run pre-commit run --all-files`
+- `uv run alembic revision --autogenerate -m "add feature"`
+- `uv run alembic upgrade head`
+
+## 开发约定
+
+- 使用异步 FastAPI 和 SQLAlchemy 2.x 写法。
+- 模块、函数和变量使用 `snake_case`，Schema 与 ORM 模型使用 `PascalCase`。
+- 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/` 下。
+- 新行为需在 `tests/` 下添加聚焦测试。
+- 使用 Loguru 记录应用日志，使用 `logger.bind()` 添加结构化上下文。
+- 禁止记录密码、令牌、Authorization、Cookie、完整请求正文等敏感数据。
+- 不要单独配置标准库或 Uvicorn logger；它们由 `core/logging.py` 统一接管。
+- 禁止在数据库 DDL 和 SQLAlchemy 模型中声明外键约束。
+- 不直接编辑 `alembic/versions/`，迁移版本通过 Alembic 命令生成。
+- 提交信息使用 Conventional Commits。

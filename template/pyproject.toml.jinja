@@ -1,0 +1,42 @@
+[project]
+name = "{{ project_slug }}"
+version = "0.1.0"
+description = "{{ project_description }}"
+readme = "README.md"
+authors = [
+    { name = "{{ author_name }}" },
+]
+requires-python = ">={{ python_version }}"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "alembic>=1.17.2",
+    "asyncpg>=0.30.0",
+    "fastapi>=0.122.0",
+    "loguru>=0.7.3",
+    "orjson>=3.10.0",
+    "psycopg[binary]>=3.2.0",
+    "pydantic-settings>=2.12.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "uvicorn[standard]>=0.38.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pre-commit>=4.5.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py{{ python_version | replace('.', '') }}"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

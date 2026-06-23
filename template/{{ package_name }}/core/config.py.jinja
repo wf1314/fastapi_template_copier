@@ -1,0 +1,80 @@
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    APP_NAME: str = "{{ project_name }}"
+    APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: Literal["local", "dev", "test", "prod"] = "local"
+    DEBUG: bool = False
+
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: Literal["auto", "text", "json"] = "auto"
+    LOG_ENQUEUE: bool = True
+    LOG_FILE_ENABLED: bool = False
+    LOG_FILE_DIR: str = "logs"
+    LOG_FILE_ROTATION: str = "100 MB"
+    LOG_FILE_RETENTION: str = "30 days"
+    LOG_FILE_COMPRESSION: str = "gz"
+
+    API_V1_PREFIX: str = "/api/v1"
+    SERVER_HOST: str = "0.0.0.0"
+    SERVER_PORT: int = {{ server_port }}
+
+    DATABASE_URL: str = "sqlite:///./app.db"
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    TIMEZONE: str = "{{ timezone }}"
+
+    @computed_field
+    @property
+    def async_database_url(self) -> str:
+        if self.DATABASE_URL.startswith("sqlite+aiosqlite://"):
+            return self.DATABASE_URL
+        if self.DATABASE_URL.startswith("sqlite://"):
+            return self.DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        if self.DATABASE_URL.startswith("postgres://"):
+            return self.DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+        if self.DATABASE_URL.startswith("postgresql+psycopg://"):
+            return self.DATABASE_URL.replace(
+                "postgresql+psycopg://", "postgresql+asyncpg://", 1
+            )
+        if self.DATABASE_URL.startswith("postgresql://"):
+            return self.DATABASE_URL.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+        return self.DATABASE_URL
+
+    @computed_field
+    @property
+    def sync_database_url(self) -> str:
+        if self.DATABASE_URL.startswith("sqlite+aiosqlite://"):
+            return self.DATABASE_URL.replace("sqlite+aiosqlite://", "sqlite://", 1)
+        if self.DATABASE_URL.startswith("postgres://"):
+            return self.DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+        if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+            return self.DATABASE_URL.replace(
+                "postgresql+asyncpg://", "postgresql+psycopg://", 1
+            )
+        if self.DATABASE_URL.startswith("postgresql://"):
+            return self.DATABASE_URL.replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+        return self.DATABASE_URL
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

@@ -1,0 +1,134 @@
+import json
+import logging
+import os
+import stat
+from collections.abc import Iterator
+
+import pytest
+from loguru import logger
+
+from {{ package_name }}.core.config import Settings
+from {{ package_name }}.core.logging import setup_logging
+
+
+def make_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "APP_NAME": "Logging Test",
+        "ENVIRONMENT": "test",
+        "LOG_LEVEL": "INFO",
+        "LOG_FORMAT": "auto",
+        "LOG_ENQUEUE": False,
+        "LOG_FILE_ENABLED": False,
+    }
+    values.update(overrides)
+    return Settings(_env_file=None, **values)
+
+
+@pytest.fixture(autouse=True)
+def reset_loguru() -> Iterator[None]:
+    yield
+    logger.complete()
+    logger.remove()
+
+
+def test_text_logging_intercepts_standard_and_uvicorn_once(capsys) -> None:
+    config = make_settings()
+    setup_logging(config)
+    setup_logging(config)
+
+    logging.getLogger("example").info("standard message", extra={"job_id": "42"})
+    logging.getLogger("uvicorn.error").warning("uvicorn message")
+
+    lines = capsys.readouterr().err.splitlines()
+    assert sum("standard message" in line for line in lines) == 1
+    assert sum("uvicorn message" in line for line in lines) == 1
+    assert logging.getLogger("uvicorn.error").level == logging.NOTSET
+
+
+def test_standard_logging_extra_is_preserved_in_json(capsys) -> None:
+    setup_logging(make_settings(LOG_FORMAT="json"))
+
+    logging.getLogger("worker").info(
+        "job completed",
+        extra={"job_id": "job-42"},
+    )
+
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["record"]["extra"]["job_id"] == "job-42"
+
+
+def test_log_level_filters_lower_priority_messages(capsys) -> None:
+    setup_logging(make_settings(LOG_LEVEL="WARNING"))
+
+    logger.info("hidden message")
+    logger.warning("visible message")
+
+    output = capsys.readouterr().err
+    assert "hidden message" not in output
+    assert "visible message" in output
+
+
+def test_production_auto_format_emits_native_loguru_json(capsys) -> None:
+    setup_logging(
+        make_settings(
+            APP_NAME="Orders API",
+            ENVIRONMENT="prod",
+            LOG_FORMAT="auto",
+        )
+    )
+
+    logger.bind(order_id="order-123").info("order accepted")
+
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["record"]["message"] == "order accepted"
+    assert payload["record"]["extra"] == {
+        "environment": "prod",
+        "order_id": "order-123",
+        "service": "Orders API",
+    }
+
+
+def test_exception_traceback_does_not_include_local_variables(capsys) -> None:
+    setup_logging(make_settings(LOG_FORMAT="json"))
+
+    sensitive_local = "must-not-appear"
+    try:
+        raise RuntimeError("expected failure")
+    except RuntimeError:
+        logger.exception("operation failed")
+
+    output = capsys.readouterr().err
+    payload = json.loads(output)
+    assert payload["record"]["exception"]["type"] == "RuntimeError"
+    assert sensitive_local not in output
+
+
+def test_file_logging_uses_rotation_layout_and_secure_permissions(tmp_path) -> None:
+    log_dir = tmp_path / "service-logs"
+    setup_logging(
+        make_settings(
+            LOG_FORMAT="json",
+            LOG_FILE_ENABLED=True,
+            LOG_FILE_DIR=str(log_dir),
+            LOG_FILE_ROTATION="1 MB",
+            LOG_FILE_RETENTION="1 day",
+            LOG_FILE_COMPRESSION="none",
+        )
+    )
+
+    logger.info("application event")
+    logger.error("error event")
+    logger.complete()
+
+    application_log = log_dir / f"application-{os.getpid()}.log"
+    error_log = log_dir / f"error-{os.getpid()}.log"
+    application_text = application_log.read_text()
+    error_text = error_log.read_text()
+
+    assert "application event" in application_text
+    assert "error event" in application_text
+    assert "application event" not in error_text
+    assert "error event" in error_text
+    assert stat.S_IMODE(log_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(application_log.stat().st_mode) == 0o600
+    assert stat.S_IMODE(error_log.stat().st_mode) == 0o600

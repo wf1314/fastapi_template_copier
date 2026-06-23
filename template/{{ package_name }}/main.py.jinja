@@ -1,0 +1,60 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from loguru import logger
+
+from {{ package_name }}.api.v1.router import api_router
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.logging import setup_logging
+
+setup_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    logger.info(
+        "Starting {} v{} in {}",
+        settings.APP_NAME,
+        settings.APP_VERSION,
+        settings.ENVIRONMENT,
+    )
+    try:
+        yield
+    finally:
+        logger.info("Application stopped")
+        await logger.complete()
+
+
+def create_app() -> FastAPI:
+    application = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        description="{{ project_description }}",
+        openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
+        docs_url=f"{settings.API_V1_PREFIX}/docs",
+        redoc_url=f"{settings.API_V1_PREFIX}/redoc",
+        lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+    @application.get("/health", tags=["health"])
+    async def health_check() -> dict[str, str]:
+        return {
+            "status": "healthy",
+            "service": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+        }
+
+    return application
+
+
+app = create_app()
