@@ -48,7 +48,7 @@ async def test_get_session_does_not_commit_automatically(
 
     monkeypatch.setattr(db_session, "async_session_maker", make_session)
 
-    dependency = db_session.get_session()
+    dependency = cast(AsyncGenerator[object], db_session.get_session())
     yielded = await anext(dependency)
     assert yielded is fake_session
 

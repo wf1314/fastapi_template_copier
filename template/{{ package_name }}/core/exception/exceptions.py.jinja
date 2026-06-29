@@ -1,6 +1,7 @@
-from typing import Any
-
 from fastapi import status
+
+from {{ package_name }}.core.error_items import ErrorItem
+from {{ package_name }}.core.exception.error_codes import ErrorCode, default_error_code
 
 
 class AppException(Exception):
@@ -14,11 +15,11 @@ class AppException(Exception):
         message: str,
         *,
         status_code: int = status.HTTP_400_BAD_REQUEST,
-        code: int | None = None,
-        errors: list[dict[str, Any]] | None = None,
+        code: int | ErrorCode | None = None,
+        errors: list[ErrorItem] | None = None,
     ) -> None:
         self.message = message
         self.status_code = status_code
-        self.code = code if code is not None else status_code
+        self.code = int(code if code is not None else default_error_code(status_code))
         self.errors = errors
         super().__init__(message)

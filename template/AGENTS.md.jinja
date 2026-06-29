@@ -2,30 +2,56 @@
 
 ## 项目结构
 
-本项目是使用 `uv` 管理的 Python {{ python_version }} FastAPI 服务。
-`{{ package_name }}/main.py` 创建应用，`{{ package_name }}/api/v1/` 存放 API，
-`{{ package_name }}/core/` 存放配置和日志，`{{ package_name }}/db/` 管理数据库
-会话，`{{ package_name }}/models/` 存放 SQLAlchemy 模型。
+本项目是使用 `uv` 管理的 Python {{ python_version }} FastAPI 服务，采用异步
+SQLAlchemy 2.x、Alembic、Pydantic Settings 和 Loguru。
+
+- `{{ package_name }}/main.py`：应用工厂 `create_app()`，挂载路由、CORS、GZip、TrustedHost、请求上下文中间件和异常处理器。
+- `{{ package_name }}/api/health.py`：根路径健康检查路由，提供 `/livez` 和 `/readyz`。
+- `{{ package_name }}/api/v1/router.py`：`build_api_router()` 聚合 v1 路由，新特性在此 `include_router` 注册。
+- `{{ package_name }}/api/v1/<feature>/`：按业务划分的特性目录，含 `router.py`（路由）与 `schema.py`（Pydantic 请求/响应模型），结构参考 `examples/`。
+- `{{ package_name }}/core/`：`config.py`（`Settings` 与缓存单例 `settings`）、`logging.py`（Loguru 初始化并接管标准库与 Uvicorn 日志）、`responses.py`（统一响应结构）、`exception/`（通用错误码、`AppException` 与全局异常处理器）、`middleware/`（请求上下文等自定义中间件）。
+- `{{ package_name }}/db/session.py`：异步引擎与请求级会话，提供 `SessionDep` 依赖。
+- `{{ package_name }}/models/base.py`：`Base` 声明式基类与 `TimestampMixin`（`id`、`created_at`、`updated_at`）；`__init__.py` 导出全部模型，供 Alembic 收集表元数据。
+- `alembic/`：迁移配置，`env.py` 读取 `settings` 并导入 `models` 包；`versions/` 仅由 Alembic 生成，禁止手写。
+- `tests/`：pytest 聚焦测试，`asyncio_mode = "auto"`。
+- `main.py`：uvicorn 启动入口；`Makefile`：常用命令快捷方式。
 
 ## 常用命令
 
-- `uv sync`
-- `cp .env.example .env`
-- `uv run uvicorn {{ package_name }}.main:app --reload`
-- `uv run pytest`
-- `uv run pre-commit run --all-files`
-- `uv run alembic revision --autogenerate -m "add feature"`
-- `uv run alembic upgrade head`
+```bash
+cp .env.example .env
+uv sync
+make run                                  # 本地热重载启动
+make test                                 # pytest
+make lint                                 # ruff check
+make typecheck                            # mypy
+make format                               # ruff format + 自动修复
+make check                                # lint + typecheck + test + 编译检查，提交前必过
+make revision MESSAGE="add feature"       # 生成 Alembic 迁移
+make migrate                              # 应用迁移到 head
+```
+
+不使用 Makefile 时的等价命令：`uv run uvicorn {{ package_name }}.main:app --reload`、
+`uv run pytest`、`uv run ruff check`、`uv run mypy`、
+`uv run alembic revision --autogenerate -m "..."`、`uv run alembic upgrade head`、
+`uv run pre-commit run --all-files`。
 
 ## 开发约定
 
-- 使用异步 FastAPI 和 SQLAlchemy 2.x 写法。
-- 模块、函数和变量使用 `snake_case`，Schema 与 ORM 模型使用 `PascalCase`。
-- 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/` 下。
+- 使用异步 FastAPI 和 SQLAlchemy 2.x 写法；模块、函数和变量用 `snake_case`，Schema 与 ORM 模型用 `PascalCase`。
+- mypy 使用 `strict = true` 并启用 `pydantic.mypy` 插件；所有函数必须标注参数与返回类型。ORM 模型使用 SQLAlchemy 2 的 `Mapped`/`mapped_column` 原生类型，不配置已弃用的 SQLAlchemy mypy 插件。
+- 配置统一通过 `{{ package_name }}.core.config.settings`（`pydantic-settings`，从环境变量和 `.env` 读取，`lru_cache` 缓存）；不要直接实例化 `Settings()`。
+- 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/`，路由与 schema 分文件，并在 `router.py` 的 `build_api_router()` 中注册。仅联调用的路由可像 `examples/` 一样用 `settings.DEBUG` 门控，默认不进生产路由。
+- 统一响应：所有接口返回 `ApiResponse`（`code`/`message`/`data`/`errors`），单对象成功用 `core.responses.success_response()`，分页列表用 `core.responses.paginated_response()` 和 `PaginatedData[T]`，错误响应遵循 `ErrorResponse`。
+- 错误明细使用 `core.error_items.ErrorItem`（`field`/`message`/`code`），不要传裸 `dict[str, Any]`。业务错误抛 `core.exception.exceptions.AppException`（携带 `status_code`、`code`、`errors`），由全局异常处理器统一兜底；默认错误码来自 `core.exception.error_codes.ErrorCode`。`0` 表示成功，`100xxx` 为模板内置通用错误码，业务模块使用独立号段（例如 `2xxxxx`/`3xxxxx`），不要直接复用 HTTP 状态码作为业务码。框架已处理 `AppException`、HTTP 异常、请求校验异常和未捕获异常，`DEBUG=false` 时不向客户端暴露内部错误。不要自行 `JSONResponse` 拼装错误体。
+- 健康检查分层：`/livez` 只表达进程存活，`/readyz` 检查数据库等关键依赖。模板不注册 `/health` 兼容入口，容器、负载均衡和发布验证使用 `/readyz`。
+- 数据库会话用 `db.session.SessionDep`；该依赖异常时回滚，但请求结束不自动提交，写操作需显式 `await session.commit()`。
+- 新增 ORM 模型继承 `models.base.Base`（可混入 `TimestampMixin`），并在 `models/__init__.py` 导出，否则 Alembic 自动生成迁移无法收集到该表。
+- 禁止在数据库 DDL 和 SQLAlchemy 模型中声明外键约束；跨表关联由 ORM 查询和业务逻辑维护。
+- 不直接编辑 `alembic/versions/`，迁移版本通过 `alembic revision --autogenerate` 生成。
+- 日志使用 Loguru，用 `logger.bind()` 添加结构化上下文；`RequestContextMiddleware` 会透传或生成 `X-Request-ID`、`X-Trace-ID`，写入响应头和日志上下文，并记录请求耗时。业务代码需要当前请求标识时使用 `core.middleware.request_context.get_request_id()` 和 `get_trace_id()`。
+- 默认启用 GZip 和 TrustedHost 中间件。生产环境必须将 `TRUSTED_HOSTS` 从 `["*"]` 调整为真实域名。
+- 禁止记录密码、令牌、Authorization、Cookie、完整请求正文等敏感数据（模板不自动脱敏 `extra` 字段与日志正文）。
+- 不要单独配置标准库或 Uvicorn logger，它们由 `core/logging.py` 的 `InterceptHandler` 统一接管；生产环境关闭变量诊断输出。
 - 新行为需在 `tests/` 下添加聚焦测试。
-- 使用 Loguru 记录应用日志，使用 `logger.bind()` 添加结构化上下文。
-- 禁止记录密码、令牌、Authorization、Cookie、完整请求正文等敏感数据。
-- 不要单独配置标准库或 Uvicorn logger；它们由 `core/logging.py` 统一接管。
-- 禁止在数据库 DDL 和 SQLAlchemy 模型中声明外键约束。
-- 不直接编辑 `alembic/versions/`，迁移版本通过 Alembic 命令生成。
-- 提交信息使用 Conventional Commits。
+- 提交信息使用 Conventional Commits（`feat:`、`fix:`、`docs:`、`refactor:`、`test:`、`chore:` 等）。

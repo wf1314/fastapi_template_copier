@@ -1,0 +1,106 @@
+import json
+from collections.abc import Iterator
+
+import httpx
+import pytest
+from pytest import CaptureFixture
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.middleware.request_context import (
+    REQUEST_ID_HEADER,
+    TRACE_ID_HEADER,
+    get_request_id,
+    get_trace_id,
+)
+from {{ package_name }}.main import create_app
+from tests.conftest import AsyncClientFactory
+
+
+@pytest.fixture
+def json_request_logging() -> Iterator[None]:
+    original_format = settings.LOG_FORMAT
+    original_enqueue = settings.LOG_ENQUEUE
+    settings.LOG_FORMAT = "json"
+    settings.LOG_ENQUEUE = False
+    try:
+        yield
+    finally:
+        settings.LOG_FORMAT = original_format
+        settings.LOG_ENQUEUE = original_enqueue
+
+
+@pytest.mark.asyncio
+async def test_request_context_headers_are_preserved(
+    async_client_for_app: AsyncClientFactory,
+) -> None:
+    app = create_app()
+
+    @app.get("/context-values")
+    async def context_values() -> dict[str, str | None]:
+        return {
+            "request_id": get_request_id(),
+            "trace_id": get_trace_id(),
+        }
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/context-values",
+            headers={
+                REQUEST_ID_HEADER: "request-123",
+                TRACE_ID_HEADER: "trace-456",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers[REQUEST_ID_HEADER] == "request-123"
+    assert response.headers[TRACE_ID_HEADER] == "trace-456"
+    assert response.json() == {
+        "request_id": "request-123",
+        "trace_id": "trace-456",
+    }
+
+
+@pytest.mark.asyncio
+async def test_request_context_generates_missing_ids(
+    async_client: httpx.AsyncClient,
+) -> None:
+    response = await async_client.get("/livez")
+
+    request_id = response.headers[REQUEST_ID_HEADER]
+    trace_id = response.headers[TRACE_ID_HEADER]
+
+    assert len(request_id) == 32
+    assert trace_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_request_context_logs_status_and_duration(
+    json_request_logging: None,
+    async_client_for_app: AsyncClientFactory,
+    capsys: CaptureFixture[str],
+) -> None:
+    async with async_client_for_app(None, "http://test", True) as client:
+        response = await client.get(
+            "/livez",
+            headers={
+                REQUEST_ID_HEADER: "request-log-1",
+                TRACE_ID_HEADER: "trace-log-1",
+            },
+        )
+
+    assert response.status_code == 200
+    records = [
+        json.loads(line)["record"]
+        for line in capsys.readouterr().err.splitlines()
+        if "Request completed" in line
+    ]
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "Request completed"
+    assert record["extra"]["request_id"] == "request-log-1"
+    assert record["extra"]["trace_id"] == "trace-log-1"
+    assert record["extra"]["method"] == "GET"
+    assert record["extra"]["path"] == "/livez"
+    assert record["extra"]["status_code"] == 200
+    assert record["extra"]["duration_ms"] >= 0

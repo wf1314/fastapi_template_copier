@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from {{ package_name }}.core.responses import ApiResponse
+from {{ package_name }}.core.responses import ApiResponse, PaginatedData
 
 
 class ExampleSuccessRequest(BaseModel):
@@ -88,6 +88,53 @@ class ExampleSuccessResponse(ApiResponse[ExampleSuccessData]):
     errors: None = Field(default=None, description="成功响应没有错误明细。")
 
 
+class ExampleItemData(BaseModel):
+    """分页列表示例中的单条业务数据。"""
+
+    id: str = Field(description="示例资源 ID。", examples=["item-1"])
+    name: str = Field(description="示例资源名称。", examples=["Example item 1"])
+    priority: int = Field(ge=1, le=5, description="示例资源优先级。", examples=[3])
+
+
+class ExampleListResponse(ApiResponse[PaginatedData[ExampleItemData]]):
+    """分页列表示例接口的统一响应体。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "items": [
+                            {
+                                "id": "item-1",
+                                "name": "Example item 1",
+                                "priority": 1,
+                            },
+                            {
+                                "id": "item-2",
+                                "name": "Example item 2",
+                                "priority": 2,
+                            },
+                        ],
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 2,
+                            "total": 5,
+                            "total_pages": 3,
+                        },
+                    },
+                    "errors": None,
+                }
+            ]
+        }
+    )
+
+    data: PaginatedData[ExampleItemData] = Field(description="分页列表业务数据。")
+    errors: None = Field(default=None, description="成功响应没有错误明细。")
+
+
 class ExampleErrorRequest(BaseModel):
     """错误示例接口的请求体。"""
 
@@ -118,4 +165,3 @@ class ExampleErrorRequest(BaseModel):
         description="触发示例错误的原因。",
         examples=["not_ready"],
     )
-

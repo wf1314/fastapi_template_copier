@@ -1,0 +1,179 @@
+from fastapi import APIRouter, status
+from loguru import logger
+from pydantic import BaseModel, Field
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.error_items import ErrorItem
+from {{ package_name }}.core.exception.error_codes import ErrorCode
+from {{ package_name }}.core.exception.exceptions import AppException
+from {{ package_name }}.core.responses import (
+    ApiResponse,
+    ErrorResponse,
+    success_response,
+)
+from {{ package_name }}.db.session import check_database_ready
+
+
+class HealthData(BaseModel):
+    """健康检查返回的服务状态数据。"""
+
+    status: str = Field(description="服务健康状态。", examples=["alive", "ready"])
+    service: str = Field(
+        description="服务显示名称。",
+        examples=["{{ project_name }}"],
+    )
+    version: str = Field(description="服务版本号。", examples=["0.1.0"])
+
+
+class ReadinessData(HealthData):
+    """就绪检查返回的服务状态数据。"""
+
+    checks: dict[str, str] = Field(
+        description="关键依赖检查结果。",
+        examples=[{"database": "ok"}],
+    )
+
+
+class HealthResponse(ApiResponse[HealthData]):
+    """健康检查接口的统一成功响应。"""
+
+    data: HealthData = Field(description="服务健康状态数据。")
+
+
+class ReadinessResponse(ApiResponse[ReadinessData]):
+    """就绪检查接口的统一成功响应。"""
+
+    data: ReadinessData = Field(description="服务就绪状态数据。")
+
+
+LIVENESS_RESPONSE_EXAMPLE = {
+    "code": 0,
+    "message": "success",
+    "data": {
+        "status": "alive",
+        "service": "{{ project_name }}",
+        "version": "0.1.0",
+    },
+    "errors": None,
+}
+
+
+READINESS_RESPONSE_EXAMPLE = {
+    "code": 0,
+    "message": "success",
+    "data": {
+        "status": "ready",
+        "service": "{{ project_name }}",
+        "version": "0.1.0",
+        "checks": {
+            "database": "ok",
+        },
+    },
+    "errors": None,
+}
+
+router = APIRouter(tags=["健康检查"])
+
+
+def _health_data(status_value: str) -> HealthData:
+    """构造基础健康检查数据。"""
+    return HealthData(
+        status=status_value,
+        service=settings.APP_NAME,
+        version=settings.APP_VERSION,
+    )
+
+
+@router.get(
+    "/livez",
+    response_model=HealthResponse,
+    summary="检查服务存活状态",
+    description=(
+        "返回服务名称、版本和进程存活状态，"
+        "不检查数据库等外部依赖。"
+    ),
+    response_description="服务当前存活状态。",
+    operation_id="get_liveness_status",
+    responses={
+        status.HTTP_200_OK: {
+            "description": "服务进程处于存活状态。",
+            "content": {
+                "application/json": {
+                    "example": LIVENESS_RESPONSE_EXAMPLE,
+                }
+            },
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ErrorResponse,
+            "description": (
+                "服务内部异常，响应体仍遵循统一错误结构。"
+            ),
+        },
+    },
+)
+async def liveness_check() -> ApiResponse[HealthData]:
+    """返回应用的基础存活状态。"""
+    return success_response(_health_data("alive"))
+
+
+@router.get(
+    "/readyz",
+    response_model=ReadinessResponse,
+    summary="检查服务就绪状态",
+    description=(
+        "返回服务名称、版本和关键依赖状态，"
+        "用于发布验证、负载均衡和容器就绪探针。"
+    ),
+    response_description="服务当前就绪状态。",
+    operation_id="get_readiness_status",
+    responses={
+        status.HTTP_200_OK: {
+            "description": "服务已准备好接收流量。",
+            "content": {
+                "application/json": {
+                    "example": READINESS_RESPONSE_EXAMPLE,
+                }
+            },
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": (
+                "服务尚未准备好接收流量，响应体仍遵循统一错误结构。"
+            ),
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ErrorResponse,
+            "description": (
+                "服务内部异常，响应体仍遵循统一错误结构。"
+            ),
+        },
+    },
+)
+async def readiness_check() -> ApiResponse[ReadinessData]:
+    """返回应用的就绪状态，并检查关键依赖。"""
+    try:
+        await check_database_ready()
+    except Exception as exc:
+        logger.exception("Readiness check failed")
+        raise AppException(
+            "Service is not ready",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code=ErrorCode.SERVICE_UNAVAILABLE,
+            errors=[
+                ErrorItem(
+                    field="database",
+                    message="Database readiness check failed.",
+                    code="dependency_unavailable",
+                )
+            ],
+        ) from exc
+
+    health_data = _health_data("ready")
+    return success_response(
+        ReadinessData(
+            status=health_data.status,
+            service=health_data.service,
+            version=health_data.version,
+            checks={"database": "ok"},
+        )
+    )

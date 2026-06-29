@@ -1,31 +1,56 @@
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
-    hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-toml
-      - id: check-ast
-      - id: check-merge-conflict
-      - id: detect-private-key
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.7
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.5.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-        pass_filenames: false
-
   - repo: local
     hooks:
+      - id: trailing-whitespace
+        name: trailing-whitespace
+        entry: uv run trailing-whitespace-fixer
+        language: system
+        types: [text]
+      - id: end-of-file-fixer
+        name: end-of-file-fixer
+        entry: uv run end-of-file-fixer
+        language: system
+        types: [text]
+      - id: check-yaml
+        name: check-yaml
+        entry: uv run check-yaml
+        language: system
+        types: [yaml]
+      - id: check-toml
+        name: check-toml
+        entry: uv run check-toml
+        language: system
+        types: [toml]
+      - id: check-ast
+        name: check-ast
+        entry: uv run check-ast
+        language: system
+        types: [python]
+      - id: check-merge-conflict
+        name: check-merge-conflict
+        entry: uv run check-merge-conflict
+        language: system
+        types: [text]
+      - id: detect-private-key
+        name: detect-private-key
+        entry: uv run detect-private-key
+        language: system
+        types: [text]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: conventional-pre-commit
+        name: conventional-pre-commit
+        entry: uv run conventional-pre-commit
+        language: system
+        stages: [commit-msg]
       - id: mypy
         name: mypy
         entry: uv run mypy

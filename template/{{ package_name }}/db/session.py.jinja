@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -24,6 +25,12 @@ async_session_maker = async_sessionmaker(
 async def dispose_engine() -> None:
     """关闭数据库连接池，供应用生命周期退出时调用。"""
     await engine.dispose()
+
+
+async def check_database_ready() -> None:
+    """执行轻量数据库探测，供 readiness 检查使用。"""
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -9,7 +10,18 @@ from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from {{ package_name }}.core.config import settings
-from {{ package_name }}.core.exceptions import AppException
+from {{ package_name }}.core.error_items import ErrorItem
+from {{ package_name }}.core.exception.error_codes import (
+    ErrorCode,
+    default_error_code,
+)
+from {{ package_name }}.core.exception.exceptions import AppException
+from {{ package_name }}.core.middleware.request_context import (
+    REQUEST_ID_HEADER,
+    TRACE_ID_HEADER,
+    get_request_id,
+    get_trace_id,
+)
 from {{ package_name }}.core.responses import error_response_content
 
 
@@ -21,24 +33,57 @@ def _status_phrase(status_code: int) -> str:
         return "HTTP error"
 
 
-def _detail_to_errors(detail: Any) -> list[dict[str, Any]] | None:
+def _loc_to_field(loc: object) -> str | None:
+    """将 Pydantic/FastAPI loc 转成稳定字段路径。"""
+    if not isinstance(loc, list | tuple):
+        return None
+    return ".".join(str(part) for part in loc)
+
+
+def _mapping_to_error_item(detail: Mapping[str, Any]) -> ErrorItem:
+    """将任意结构化错误映射归一化为 ErrorItem。"""
+    field = detail.get("field")
+    message = detail.get("message") or detail.get("msg") or detail.get("detail")
+    code = detail.get("code") or detail.get("type")
+    return ErrorItem(
+        field=field if isinstance(field, str) else _loc_to_field(detail.get("loc")),
+        message=str(message) if message is not None else "Invalid request",
+        code=str(code) if code is not None else None,
+    )
+
+
+def _detail_to_errors(detail: Any) -> list[ErrorItem] | None:
     """将 FastAPI/Starlette 异常详情转换为统一错误明细。"""
-    if isinstance(detail, dict):
-        return [detail]
+    if isinstance(detail, Mapping):
+        return [_mapping_to_error_item(detail)]
     if isinstance(detail, list):
-        if all(isinstance(item, dict) for item in detail):
-            return [cast(dict[str, Any], item) for item in detail]
-        return [{"detail": item} for item in detail]
+        if all(isinstance(item, Mapping) for item in detail):
+            return [
+                _mapping_to_error_item(cast(Mapping[str, Any], item))
+                for item in detail
+            ]
+        return [ErrorItem(message=str(item)) for item in detail]
     return None
+
+
+def _request_context(request: Request) -> tuple[str | None, str | None]:
+    """从请求 state 或当前上下文中读取日志关联标识。"""
+    state_request_id = getattr(request.state, "request_id", None)
+    state_trace_id = getattr(request.state, "trace_id", None)
+    request_id = (
+        state_request_id if isinstance(state_request_id, str) else get_request_id()
+    )
+    trace_id = state_trace_id if isinstance(state_trace_id, str) else get_trace_id()
+    return request_id, trace_id
 
 
 def _error_response(
     *,
     status_code: int,
     message: str,
-    code: int | None = None,
-    errors: list[dict[str, Any]] | None = None,
-    headers: dict[str, str] | None = None,
+    code: int | ErrorCode | None = None,
+    errors: list[ErrorItem] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """构造统一错误响应。"""
     return JSONResponse(
@@ -46,7 +91,7 @@ def _error_response(
         headers=headers,
         content=jsonable_encoder(
             error_response_content(
-                code=status_code if code is None else code,
+                code=default_error_code(status_code) if code is None else code,
                 message=message,
                 errors=errors,
             )
@@ -94,8 +139,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         """处理请求参数校验失败。"""
         return _error_response(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code=ErrorCode.VALIDATION_ERROR,
             message="Request validation failed",
-            errors=list(exc.errors()),
+            errors=_detail_to_errors(exc.errors()),
         )
 
     @app.exception_handler(Exception)
@@ -104,9 +150,26 @@ def register_exception_handlers(app: FastAPI) -> None:
         exc: Exception,
     ) -> JSONResponse:
         """处理未预期异常，默认隐藏内部错误细节。"""
-        logger.exception("Unhandled exception while processing {}", request.url.path)
+        request_id, trace_id = _request_context(request)
+        logger.bind(
+            request_id=request_id,
+            trace_id=trace_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ).exception("Unhandled exception")
+        headers = {
+            name: value
+            for name, value in (
+                (REQUEST_ID_HEADER, request_id),
+                (TRACE_ID_HEADER, trace_id),
+            )
+            if value is not None
+        }
         message = str(exc) if settings.DEBUG else "Internal server error"
         return _error_response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code=ErrorCode.INTERNAL_ERROR,
             message=message,
+            headers=headers or None,
         )

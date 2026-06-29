@@ -1,0 +1,64 @@
+from collections.abc import Iterator
+
+import pytest
+from fastapi.responses import PlainTextResponse
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.main import create_app
+from tests.conftest import AsyncClientFactory
+
+
+@pytest.fixture
+def middleware_settings() -> Iterator[None]:
+    original_values = {
+        "GZIP_ENABLED": settings.GZIP_ENABLED,
+        "GZIP_MIN_SIZE": settings.GZIP_MIN_SIZE,
+        "GZIP_COMPRESS_LEVEL": settings.GZIP_COMPRESS_LEVEL,
+        "TRUSTED_HOSTS": settings.TRUSTED_HOSTS,
+    }
+    try:
+        yield
+    finally:
+        for name, value in original_values.items():
+            setattr(settings, name, value)
+
+
+@pytest.mark.asyncio
+async def test_gzip_middleware_compresses_large_responses(
+    async_client_for_app: AsyncClientFactory,
+    middleware_settings: None,
+) -> None:
+    settings.GZIP_ENABLED = True
+    settings.GZIP_MIN_SIZE = 100
+    settings.TRUSTED_HOSTS = ["test"]
+    app = create_app()
+
+    @app.get("/large-response")
+    async def large_response() -> PlainTextResponse:
+        return PlainTextResponse("x" * 2000)
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/large-response",
+            headers={"Accept-Encoding": "gzip"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-encoding"] == "gzip"
+
+
+@pytest.mark.asyncio
+async def test_trusted_host_middleware_rejects_untrusted_hosts(
+    async_client_for_app: AsyncClientFactory,
+    middleware_settings: None,
+) -> None:
+    settings.TRUSTED_HOSTS = ["api.example.com"]
+
+    async with async_client_for_app(
+        create_app(),
+        "http://evil.example.com",
+        True,
+    ) as client:
+        response = await client.get("/livez")
+
+    assert response.status_code == 400

@@ -25,9 +25,11 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "conventional-pre-commit>=3.5.0",
     "httpx>=0.28.1",
     "mypy>=1.19.0",
     "pre-commit>=4.5.0",
+    "pre-commit-hooks>=6.0.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.15.0",
@@ -43,17 +45,24 @@ target-version = "py{{ python_version | replace('.', '') }}"
 line-length = 88
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC"]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
 
 [tool.mypy]
 python_version = "{{ python_version }}"
 files = ["{{ package_name }}", "tests", "main.py", "alembic/env.py"]
+strict = true
+plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true
-disallow_untyped_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["{{ package_name }}"]

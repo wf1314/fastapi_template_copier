@@ -1,24 +1,20 @@
 import httpx
 import pytest
+from pytest import MonkeyPatch
 
-from {{ package_name }}.main import create_app
+from {{ package_name }}.api import health as health_api
+from {{ package_name }}.core.exception.error_codes import ErrorCode
 
 
 @pytest.mark.asyncio
-async def test_health_check() -> None:
-    transport = httpx.ASGITransport(app=create_app())
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://test",
-    ) as client:
-        response = await client.get("/health")
-
+async def test_liveness_check(async_client: httpx.AsyncClient) -> None:
+    response = await async_client.get("/livez")
     assert response.status_code == 200
     assert response.json() == {
         "code": 0,
         "message": "success",
         "data": {
-            "status": "healthy",
+            "status": "alive",
             "service": "{{ project_name }}",
             "version": "0.1.0",
         },
@@ -27,35 +23,114 @@ async def test_health_check() -> None:
 
 
 @pytest.mark.asyncio
-async def test_health_check_openapi_documentation() -> None:
-    transport = httpx.ASGITransport(app=create_app())
-    async with httpx.AsyncClient(
-        transport=transport,
-        base_url="http://test",
-    ) as client:
-        response = await client.get("/api/v1/openapi.json")
+async def test_readiness_check(async_client: httpx.AsyncClient) -> None:
+    response = await async_client.get("/readyz")
+    assert response.status_code == 200
+    assert response.json() == {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "status": "ready",
+            "service": "{{ project_name }}",
+            "version": "0.1.0",
+            "checks": {"database": "ok"},
+        },
+        "errors": None,
+    }
 
+
+@pytest.mark.asyncio
+async def test_legacy_health_check_is_not_registered(
+    async_client: httpx.AsyncClient,
+) -> None:
+    response = await async_client.get("/health")
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": int(ErrorCode.NOT_FOUND),
+        "message": "Not Found",
+        "data": None,
+        "errors": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_readiness_check_reports_dependency_failure(
+    async_client: httpx.AsyncClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def broken_database_check() -> None:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(health_api, "check_database_ready", broken_database_check)
+
+    response = await async_client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": int(ErrorCode.SERVICE_UNAVAILABLE),
+        "message": "Service is not ready",
+        "data": None,
+        "errors": [
+            {
+                "field": "database",
+                "message": "Database readiness check failed.",
+                "code": "dependency_unavailable",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_health_check_openapi_documentation(
+    async_client: httpx.AsyncClient,
+) -> None:
+    response = await async_client.get("/api/v1/openapi.json")
     assert response.status_code == 200
     openapi = response.json()
     tag_descriptions = {tag["name"]: tag["description"] for tag in openapi["tags"]}
     assert (
         tag_descriptions["健康检查"]
-        == "用于探针、负载均衡和发布验证的服务状态接口。"
+        == "用于存活探针、就绪探针、负载均衡和发布验证的服务状态接口。"
     )
 
-    operation = openapi["paths"]["/health"]["get"]
-    assert operation["operationId"] == "get_health_status"
-    assert operation["tags"] == ["健康检查"]
-    assert operation["summary"] == "检查服务健康状态"
-    assert "容器探针" in operation["description"]
-    assert operation["responses"]["200"]["description"] == "服务处于健康状态。"
-    assert operation["responses"]["200"]["content"]["application/json"]["schema"][
+    liveness_operation = openapi["paths"]["/livez"]["get"]
+    assert liveness_operation["operationId"] == "get_liveness_status"
+    assert liveness_operation["tags"] == ["健康检查"]
+    assert liveness_operation["summary"] == "检查服务存活状态"
+    assert "不检查数据库" in liveness_operation["description"]
+    assert (
+        liveness_operation["responses"]["200"]["description"]
+        == "服务进程处于存活状态。"
+    )
+    assert liveness_operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ][
         "$ref"
     ].endswith("/HealthResponse")
-    assert operation["responses"]["200"]["content"]["application/json"]["example"][
-        "data"
-    ]["status"] == "healthy"
+    assert liveness_operation["responses"]["200"]["content"]["application/json"][
+        "example"
+    ]["data"]["status"] == "alive"
+
+    readiness_operation = openapi["paths"]["/readyz"]["get"]
+    assert readiness_operation["operationId"] == "get_readiness_status"
+    assert readiness_operation["tags"] == ["健康检查"]
+    assert readiness_operation["summary"] == "检查服务就绪状态"
+    assert "关键依赖状态" in readiness_operation["description"]
     assert (
-        operation["responses"]["500"]["description"]
+        readiness_operation["responses"]["200"]["description"]
+        == "服务已准备好接收流量。"
+    )
+    assert readiness_operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ReadinessResponse")
+    assert readiness_operation["responses"]["200"]["content"]["application/json"][
+        "example"
+    ]["data"]["checks"] == {"database": "ok"}
+    assert (
+        readiness_operation["responses"]["503"]["description"]
+        == "服务尚未准备好接收流量，响应体仍遵循统一错误结构。"
+    )
+    assert (
+        readiness_operation["responses"]["500"]["description"]
         == "服务内部异常，响应体仍遵循统一错误结构。"
     )
+    assert "/health" not in openapi["paths"]

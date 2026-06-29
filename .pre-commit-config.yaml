@@ -17,6 +17,11 @@ repos:
 
   - repo: local
     hooks:
+      - id: conventional-pre-commit
+        name: conventional-pre-commit
+        entry: uv run conventional-pre-commit
+        language: system
+        stages: [commit-msg]
       - id: mypy
         name: mypy
         entry: uv run mypy
