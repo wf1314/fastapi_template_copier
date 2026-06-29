@@ -1,1 +1,1 @@
-"""Core application utilities."""
+"""应用核心工具包。"""

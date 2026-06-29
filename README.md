@@ -31,10 +31,11 @@ uvx copier copy /path/to/this/template /path/to/new-project \
 
 - 默认使用 `app/` 作为 Python 导入包目录
 - FastAPI 应用工厂与 `/health` 健康检查
+- `api/v1/<resource>/router.py` 和 `schema.py` 风格的接口模块
 - Pydantic Settings 环境配置
 - SQLAlchemy 异步会话与空模型基类
 - Alembic 迁移环境，不预置迁移版本
-- `uv`、Ruff、pytest、pre-commit
+- `uv`、Ruff、mypy、pytest、pre-commit
 - Dockerfile 与 `.dockerignore`
 - 面向生成项目的 `AGENTS.md`
 

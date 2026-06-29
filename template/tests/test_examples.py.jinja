@@ -1,0 +1,188 @@
+from collections.abc import Iterator
+
+import httpx
+import pytest
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.main import create_app
+
+
+@pytest.fixture(autouse=True)
+def enable_debug_examples() -> Iterator[None]:
+    """示例接口仅在 DEBUG 模式下挂载，测试默认开启 DEBUG。"""
+    original = settings.DEBUG
+    settings.DEBUG = True
+    yield
+    settings.DEBUG = original
+
+
+@pytest.mark.asyncio
+async def test_example_success() -> None:
+    transport = httpx.ASGITransport(app=create_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/examples/success",
+            json={
+                "name": "orders",
+                "priority": 3,
+                "tags": ["demo", "schema"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "request_id": "example-orders-3",
+            "message": "Example request accepted",
+            "accepted": True,
+            "echo": {
+                "name": "orders",
+                "priority": 3,
+                "tags": ["demo", "schema"],
+            },
+        },
+        "errors": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_example_error() -> None:
+    transport = httpx.ASGITransport(app=create_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/examples/error",
+            json={
+                "resource_id": "order-404",
+                "reason": "not_ready",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": 400,
+        "message": "Example error",
+        "data": None,
+        "errors": [
+            {
+                "field": "resource_id",
+                "message": "Resource order-404 cannot be processed: not_ready",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_example_request_and_response_schemas_are_documented() -> None:
+    transport = httpx.ASGITransport(app=create_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/api/v1/openapi.json")
+
+    assert response.status_code == 200
+    openapi = response.json()
+    schemas = openapi["components"]["schemas"]
+    for schema_name in (
+        "ExampleSuccessRequest",
+        "ExampleSuccessResponse",
+        "ExampleErrorRequest",
+        "ErrorResponse",
+    ):
+        assert schema_name in schemas
+    assert schemas["ExampleSuccessRequest"]["examples"][0]["name"] == "orders"
+    assert (
+        schemas["ExampleSuccessResponse"]["examples"][0]["data"]["request_id"]
+        == "example-orders-3"
+    )
+    assert (
+        schemas["ExampleErrorRequest"]["examples"][0]["resource_id"]
+        == "order-404"
+    )
+
+    success_operation = openapi["paths"]["/api/v1/examples/success"]["post"]
+    assert success_operation["operationId"] == "create_example_success"
+    assert success_operation["tags"] == ["示例接口"]
+    assert success_operation["summary"] == "成功响应示例"
+    assert "统一成功响应" in success_operation["description"]
+    assert success_operation["requestBody"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/ExampleSuccessRequest")
+    assert (
+        success_operation["responses"]["200"]["description"]
+        == "示例请求已被接受。"
+    )
+    assert success_operation["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ExampleSuccessResponse")
+    assert (
+        success_operation["responses"]["422"]["description"]
+        == "请求参数校验失败，响应体遵循统一错误结构。"
+    )
+    assert success_operation["responses"]["422"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ErrorResponse")
+    assert (
+        success_operation["responses"]["500"]["description"]
+        == "服务内部异常，响应体遵循统一错误结构。"
+    )
+    assert success_operation["responses"]["500"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ErrorResponse")
+
+    error_operation = openapi["paths"]["/api/v1/examples/error"]["post"]
+    assert error_operation["operationId"] == "create_example_error"
+    assert error_operation["tags"] == ["示例接口"]
+    assert error_operation["summary"] == "错误响应示例"
+    assert "统一错误响应结构" in error_operation["description"]
+    assert error_operation["requestBody"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/ExampleErrorRequest")
+    assert (
+        error_operation["responses"]["400"]["description"]
+        == "示例业务错误响应。"
+    )
+    assert error_operation["responses"]["400"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ErrorResponse")
+    assert (
+        error_operation["responses"]["422"]["description"]
+        == "请求参数校验失败，响应体遵循统一错误结构。"
+    )
+    assert error_operation["responses"]["422"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ErrorResponse")
+    assert (
+        error_operation["responses"]["500"]["description"]
+        == "服务内部异常，响应体遵循统一错误结构。"
+    )
+    assert error_operation["responses"]["500"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/ErrorResponse")
+
+
+@pytest.mark.asyncio
+async def test_examples_are_hidden_when_debug_disabled() -> None:
+    settings.DEBUG = False
+    transport = httpx.ASGITransport(app=create_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        success = await client.post(
+            "/api/v1/examples/success",
+            json={"name": "x", "priority": 1, "tags": []},
+        )
+        openapi = (await client.get("/api/v1/openapi.json")).json()
+
+    assert success.status_code == 404
+    assert "/api/v1/examples/success" not in openapi["paths"]
+    assert "/api/v1/examples/error" not in openapi["paths"]

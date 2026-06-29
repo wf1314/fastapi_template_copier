@@ -1,0 +1,83 @@
+.PHONY: help sync run run-prod test lint typecheck format check revision migrate sql sql-full downgrade stamp-head docker-build docker-run
+
+UV ?= uv
+PYTHON ?= python
+ALEMBIC ?= alembic
+ENVIRONMENT ?= local
+HOST ?= 0.0.0.0
+PORT ?= {{ server_port }}
+IMAGE ?= {{ project_slug }}:latest
+MESSAGE ?= auto migration
+SQL_TARGET ?= head
+SQL_FILE ?= migration.sql
+FULL_SQL_RANGE ?= base:head
+FULL_SQL_FILE ?= full_migration.sql
+
+help:
+	@echo "Usage:"
+	@echo "  make sync                         Install project dependencies"
+	@echo "  make run                          Run local dev server with reload"
+	@echo "  make run ENVIRONMENT=dev          Run dev server with another environment"
+	@echo "  make run-prod                     Run production-style Uvicorn entry"
+	@echo "  make test                         Run pytest"
+	@echo "  make lint                         Run Ruff checks"
+	@echo "  make typecheck                    Run mypy static type checks"
+	@echo "  make format                       Format code with Ruff"
+	@echo "  make check                        Run lint, type checks, tests, and compile checks"
+	@echo "  make revision MESSAGE='add table' Generate an Alembic migration"
+	@echo "  make migrate                      Apply Alembic migrations to head"
+	@echo "  make sql                          Generate Alembic SQL to $(SQL_FILE)"
+	@echo "  make sql-full                     Generate SQL from $(FULL_SQL_RANGE) to $(FULL_SQL_FILE)"
+	@echo "  make downgrade                    Downgrade one Alembic revision"
+	@echo "  make stamp-head                   Mark database as current revision"
+	@echo "  make docker-build                 Build Docker image $(IMAGE)"
+	@echo "  make docker-run                   Run Docker image $(IMAGE)"
+
+sync:
+	$(UV) sync
+
+run:
+	ENVIRONMENT=$(ENVIRONMENT) SERVER_RELOAD=true $(UV) run $(PYTHON) main.py
+
+run-prod:
+	ENVIRONMENT=prod SERVER_RELOAD=false $(UV) run uvicorn {{ package_name }}.main:app --host $(HOST) --port $(PORT)
+
+test:
+	$(UV) run pytest
+
+lint:
+	$(UV) run ruff check
+
+typecheck:
+	$(UV) run mypy
+
+format:
+	$(UV) run ruff format
+	$(UV) run ruff check --fix
+
+check: lint typecheck test
+	$(UV) run $(PYTHON) -m compileall {{ package_name }} tests
+
+revision:
+	$(UV) run $(ALEMBIC) revision --autogenerate -m "$(MESSAGE)"
+
+migrate:
+	$(UV) run $(ALEMBIC) upgrade head
+
+sql:
+	$(UV) run $(ALEMBIC) upgrade $(SQL_TARGET) --sql > $(SQL_FILE)
+
+sql-full:
+	$(UV) run $(ALEMBIC) upgrade $(FULL_SQL_RANGE) --sql > $(FULL_SQL_FILE)
+
+downgrade:
+	$(UV) run $(ALEMBIC) downgrade -1
+
+stamp-head:
+	$(UV) run $(ALEMBIC) stamp head
+
+docker-build:
+	docker build -t $(IMAGE) .
+
+docker-run:
+	docker run --rm -p $(PORT):$(PORT) --env-file .env $(IMAGE)

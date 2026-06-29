@@ -1,8 +1,8 @@
 """${message}
 
-Revision ID: ${up_revision}
-Revises: ${down_revision | comma,n}
-Create Date: ${create_date}
+迁移版本 ID: ${up_revision}
+上一版本: ${down_revision | comma,n}
+创建时间: ${create_date}
 
 """
 from collections.abc import Sequence
@@ -18,10 +18,10 @@ depends_on: str | Sequence[str] | None = ${repr(depends_on)}
 
 
 def upgrade() -> None:
-    """Apply schema changes."""
+    """应用数据库结构变更。"""
     ${upgrades if upgrades else "pass"}
 
 
 def downgrade() -> None:
-    """Revert schema changes."""
+    """回滚数据库结构变更。"""
     ${downgrades if downgrades else "pass"}

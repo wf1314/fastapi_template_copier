@@ -1,1 +1,1 @@
-"""Application package."""
+"""应用主包。"""

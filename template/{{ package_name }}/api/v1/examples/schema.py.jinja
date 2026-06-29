@@ -1,0 +1,121 @@
+from pydantic import BaseModel, ConfigDict, Field
+
+from {{ package_name }}.core.responses import ApiResponse
+
+
+class ExampleSuccessRequest(BaseModel):
+    """成功示例接口的请求体。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "orders",
+                    "priority": 3,
+                    "tags": ["demo", "schema"],
+                }
+            ]
+        }
+    )
+
+    name: str = Field(
+        min_length=1,
+        max_length=64,
+        description="示例任务名称。",
+        examples=["orders"],
+    )
+    priority: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="示例任务优先级，1 最低，5 最高。",
+        examples=[3],
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="示例标签，最多 5 个。",
+        examples=[["demo", "schema"]],
+    )
+
+
+class ExampleSuccessData(BaseModel):
+    """成功示例接口返回的业务数据。"""
+
+    request_id: str = Field(
+        description="服务端生成的请求标识。",
+        examples=["example-orders-3"],
+    )
+    message: str = Field(
+        description="业务处理结果说明。",
+        examples=["Example request accepted"],
+    )
+    accepted: bool = Field(
+        description="请求是否已被业务接受。",
+        examples=[True],
+    )
+    echo: ExampleSuccessRequest = Field(
+        description="回显请求内容，便于查看 schema。",
+    )
+
+
+class ExampleSuccessResponse(ApiResponse[ExampleSuccessData]):
+    """成功示例接口的统一响应体。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "request_id": "example-orders-3",
+                        "message": "Example request accepted",
+                        "accepted": True,
+                        "echo": {
+                            "name": "orders",
+                            "priority": 3,
+                            "tags": ["demo", "schema"],
+                        },
+                    },
+                    "errors": None,
+                }
+            ]
+        }
+    )
+
+    data: ExampleSuccessData = Field(description="成功响应业务数据。")
+    errors: None = Field(default=None, description="成功响应没有错误明细。")
+
+
+class ExampleErrorRequest(BaseModel):
+    """错误示例接口的请求体。"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "resource_id": "order-404",
+                    "reason": "not_ready",
+                }
+            ]
+        }
+    )
+
+    resource_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description=(
+            "示例资源 ID，仅允许字母、数字、下划线和连字符。"
+        ),
+        examples=["order-404"],
+    )
+    reason: str = Field(
+        default="not_ready",
+        min_length=1,
+        max_length=120,
+        description="触发示例错误的原因。",
+        examples=["not_ready"],
+    )
+

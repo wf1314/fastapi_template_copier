@@ -52,11 +52,6 @@ python_version:
     - "3.12"
   default: "3.13"
 
-timezone:
-  type: str
-  help: 默认时区
-  default: Asia/Shanghai
-
 server_port:
   type: int
   help: 服务监听端口

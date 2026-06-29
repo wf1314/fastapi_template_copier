@@ -13,16 +13,20 @@ dependencies = [
     "asyncpg>=0.30.0",
     "fastapi>=0.122.0",
     "loguru>=0.7.3",
-    "orjson>=3.10.0",
     "psycopg[binary]>=3.2.0",
     "pydantic-settings>=2.12.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "uvicorn[standard]>=0.38.0",
 ]
 
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "mypy>=1.19.0",
     "pre-commit>=4.5.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
@@ -40,3 +44,16 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "{{ python_version }}"
+files = ["{{ package_name }}", "tests", "main.py", "alembic/env.py"]
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["{{ package_name }}"]

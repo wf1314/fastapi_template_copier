@@ -1,5 +1,7 @@
 from collections.abc import AsyncIterator
+from typing import Annotated
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -19,11 +21,19 @@ async_session_maker = async_sessionmaker(
 )
 
 
+async def dispose_engine() -> None:
+    """关闭数据库连接池，供应用生命周期退出时调用。"""
+    await engine.dispose()
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
+    """提供请求级数据库会话，异常时回滚但不自动提交。"""
     async with async_session_maker() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
+
+# 路由中复用的 FastAPI 数据库会话依赖类型。
+SessionDep = Annotated[AsyncSession, Depends(get_session)]

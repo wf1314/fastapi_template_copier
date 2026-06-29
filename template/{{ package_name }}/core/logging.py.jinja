@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from .config import Settings, settings
+from {{ package_name }}.core.config import Settings, settings
 
 TEXT_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
@@ -31,7 +31,10 @@ STANDARD_LOG_RECORD_ATTRIBUTES = frozenset(
 
 
 class InterceptHandler(logging.Handler):
+    """将标准 logging 日志转发给 Loguru。"""
+
     def emit(self, record: logging.LogRecord) -> None:
+        """保留原始日志层级和额外字段后交给 Loguru 输出。"""
         level: str | int
         try:
             level = logger.level(record.levelname).name
@@ -56,10 +59,12 @@ class InterceptHandler(logging.Handler):
 
 
 def _secure_file_opener(path: str, flags: int) -> int:
+    """用仅当前用户可读写的权限创建日志文件。"""
     return os.open(path, flags, 0o600)
 
 
 def _sink_options(config: Settings, *, serialize: bool) -> dict[str, Any]:
+    """根据运行环境生成控制台和文件日志的公共输出参数。"""
     options: dict[str, Any] = {
         "level": config.LOG_LEVEL.upper(),
         "serialize": serialize,
@@ -73,6 +78,7 @@ def _sink_options(config: Settings, *, serialize: bool) -> dict[str, Any]:
 
 
 def _configure_standard_logging() -> None:
+    """接管标准 logging 和 Uvicorn 日志，避免重复输出。"""
     handler = InterceptHandler()
     logging.basicConfig(handlers=[handler], level=0, force=True)
     logging.captureWarnings(True)
@@ -85,6 +91,7 @@ def _configure_standard_logging() -> None:
 
 
 def setup_logging(config: Settings | None = None) -> None:
+    """初始化应用日志输出格式、附加字段和可选文件落盘。"""
     config = config or settings
     serialize = config.LOG_FORMAT == "json" or (
         config.LOG_FORMAT == "auto" and config.ENVIRONMENT == "prod"

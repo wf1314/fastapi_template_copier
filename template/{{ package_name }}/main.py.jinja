@@ -1,19 +1,71 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from pydantic import BaseModel, Field
 
-from {{ package_name }}.api.v1.router import api_router
+from {{ package_name }}.api.v1.router import build_api_router
 from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.exception_handlers import register_exception_handlers
 from {{ package_name }}.core.logging import setup_logging
+from {{ package_name }}.core.responses import (
+    ApiResponse,
+    ErrorResponse,
+    success_response,
+)
+from {{ package_name }}.db.session import dispose_engine
 
-setup_logging()
+OPENAPI_TAGS = [
+    {
+        "name": "健康检查",
+        "description": (
+            "用于探针、负载均衡和发布验证的服务状态接口。"
+        ),
+    },
+    {
+        "name": "示例接口",
+        "description": (
+            "展示统一响应结构、请求体验证"
+            "和错误响应格式的模板示例。"
+        ),
+    },
+]
+
+
+class HealthData(BaseModel):
+    """健康检查返回的服务状态数据。"""
+
+    status: str = Field(description="服务健康状态。", examples=["healthy"])
+    service: str = Field(
+        description="服务显示名称。",
+        examples=["{{ project_name }}"],
+    )
+    version: str = Field(description="服务版本号。", examples=["0.1.0"])
+
+
+class HealthResponse(ApiResponse[HealthData]):
+    """健康检查接口的统一成功响应。"""
+
+    data: HealthData = Field(description="服务健康状态数据。")
+
+
+HEALTH_RESPONSE_EXAMPLE = {
+    "code": 0,
+    "message": "success",
+    "data": {
+        "status": "healthy",
+        "service": "{{ project_name }}",
+        "version": "0.1.0",
+    },
+    "errors": None,
+}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """管理应用启动和关闭时的基础资源。"""
     logger.info(
         "Starting {} v{} in {}",
         settings.APP_NAME,
@@ -23,18 +75,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await dispose_engine()
         logger.info("Application stopped")
         await logger.complete()
 
 
 def create_app() -> FastAPI:
+    """创建并配置 FastAPI 应用实例。"""
+    setup_logging()
     application = FastAPI(
         title=settings.APP_NAME,
+        summary="{{ project_description }}",
         version=settings.APP_VERSION,
-        description="{{ project_description }}",
+        description=(
+            "{{ project_description }}\n\n"
+            "所有业务接口默认使用统一响应结构："
+            "`code`、`message`、`data`、`errors`。"
+        ),
         openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
         docs_url=f"{settings.API_V1_PREFIX}/docs",
         redoc_url=f"{settings.API_V1_PREFIX}/redoc",
+        openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
     )
     application.add_middleware(
@@ -44,15 +105,46 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    application.include_router(api_router, prefix=settings.API_V1_PREFIX)
+    register_exception_handlers(application)
+    application.include_router(build_api_router(), prefix=settings.API_V1_PREFIX)
 
-    @application.get("/health", tags=["health"])
-    async def health_check() -> dict[str, str]:
-        return {
-            "status": "healthy",
-            "service": settings.APP_NAME,
-            "version": settings.APP_VERSION,
-        }
+    @application.get(
+        "/health",
+        tags=["健康检查"],
+        response_model=HealthResponse,
+        summary="检查服务健康状态",
+        description=(
+            "返回服务名称、版本和健康状态，"
+            "供容器探针和负载均衡检查使用。"
+        ),
+        response_description="服务当前健康状态。",
+        operation_id="get_health_status",
+        responses={
+            status.HTTP_200_OK: {
+                "description": "服务处于健康状态。",
+                "content": {
+                    "application/json": {
+                        "example": HEALTH_RESPONSE_EXAMPLE,
+                    }
+                },
+            },
+            status.HTTP_500_INTERNAL_SERVER_ERROR: {
+                "model": ErrorResponse,
+                "description": (
+                    "服务内部异常，响应体仍遵循统一错误结构。"
+                ),
+            },
+        },
+    )
+    async def health_check() -> ApiResponse[HealthData]:
+        """返回应用的基础健康状态。"""
+        return success_response(
+            HealthData(
+                status="healthy",
+                service=settings.APP_NAME,
+                version=settings.APP_VERSION,
+            )
+        )
 
     return application
 

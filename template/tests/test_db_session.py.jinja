@@ -1,0 +1,83 @@
+from collections.abc import AsyncGenerator
+from types import TracebackType
+from typing import cast
+
+import pytest
+from pytest import MonkeyPatch
+
+from {{ package_name }}.db import session as db_session
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self.commit_count = 0
+        self.rollback_count = 0
+        self.close_count = 0
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
+
+class FakeSessionContext:
+    def __init__(self, session: FakeSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> FakeSession:
+        return self.session
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.session.close_count += 1
+
+
+@pytest.mark.asyncio
+async def test_get_session_does_not_commit_automatically(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    fake_session = FakeSession()
+
+    def make_session() -> FakeSessionContext:
+        return FakeSessionContext(fake_session)
+
+    monkeypatch.setattr(db_session, "async_session_maker", make_session)
+
+    dependency = db_session.get_session()
+    yielded = await anext(dependency)
+    assert yielded is fake_session
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(dependency)
+
+    assert fake_session.commit_count == 0
+    assert fake_session.rollback_count == 0
+    assert fake_session.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_session_rolls_back_on_exception(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    fake_session = FakeSession()
+
+    def make_session() -> FakeSessionContext:
+        return FakeSessionContext(fake_session)
+
+    monkeypatch.setattr(db_session, "async_session_maker", make_session)
+
+    dependency = cast(AsyncGenerator[object], db_session.get_session())
+    yielded = await anext(dependency)
+    assert yielded is fake_session
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await dependency.athrow(RuntimeError("write failed"))
+
+    assert fake_session.commit_count == 0
+    assert fake_session.rollback_count == 1
+    assert fake_session.close_count == 1

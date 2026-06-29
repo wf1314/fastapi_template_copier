@@ -1,0 +1,112 @@
+from http import HTTPStatus
+from typing import Any, cast
+
+from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from loguru import logger
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.exceptions import AppException
+from {{ package_name }}.core.responses import error_response_content
+
+
+def _status_phrase(status_code: int) -> str:
+    """根据 HTTP 状态码生成默认错误消息。"""
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "HTTP error"
+
+
+def _detail_to_errors(detail: Any) -> list[dict[str, Any]] | None:
+    """将 FastAPI/Starlette 异常详情转换为统一错误明细。"""
+    if isinstance(detail, dict):
+        return [detail]
+    if isinstance(detail, list):
+        if all(isinstance(item, dict) for item in detail):
+            return [cast(dict[str, Any], item) for item in detail]
+        return [{"detail": item} for item in detail]
+    return None
+
+
+def _error_response(
+    *,
+    status_code: int,
+    message: str,
+    code: int | None = None,
+    errors: list[dict[str, Any]] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    """构造统一错误响应。"""
+    return JSONResponse(
+        status_code=status_code,
+        headers=headers,
+        content=jsonable_encoder(
+            error_response_content(
+                code=status_code if code is None else code,
+                message=message,
+                errors=errors,
+            )
+        ),
+    )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """注册全局异常处理器，保证错误响应结构一致。"""
+
+    @app.exception_handler(AppException)
+    async def app_exception_handler(
+        _request: Request,
+        exc: AppException,
+    ) -> JSONResponse:
+        """处理应用主动抛出的业务异常。"""
+        return _error_response(
+            status_code=exc.status_code,
+            code=exc.code,
+            message=exc.message,
+            errors=exc.errors,
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(
+        _request: Request,
+        exc: StarletteHTTPException,
+    ) -> JSONResponse:
+        """处理路由未命中等 HTTP 异常。"""
+        message = exc.detail if isinstance(exc.detail, str) else _status_phrase(
+            exc.status_code
+        )
+        return _error_response(
+            status_code=exc.status_code,
+            message=message,
+            errors=_detail_to_errors(exc.detail),
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        _request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        """处理请求参数校验失败。"""
+        return _error_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            message="Request validation failed",
+            errors=list(exc.errors()),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request,
+        exc: Exception,
+    ) -> JSONResponse:
+        """处理未预期异常，默认隐藏内部错误细节。"""
+        logger.exception("Unhandled exception while processing {}", request.url.path)
+        message = str(exc) if settings.DEBUG else "Internal server error"
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            message=message,
+        )

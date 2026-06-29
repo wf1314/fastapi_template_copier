@@ -15,7 +15,47 @@ async def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "healthy",
-        "service": "{{ project_name }}",
-        "version": "0.1.0",
+        "code": 0,
+        "message": "success",
+        "data": {
+            "status": "healthy",
+            "service": "{{ project_name }}",
+            "version": "0.1.0",
+        },
+        "errors": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_health_check_openapi_documentation() -> None:
+    transport = httpx.ASGITransport(app=create_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/api/v1/openapi.json")
+
+    assert response.status_code == 200
+    openapi = response.json()
+    tag_descriptions = {tag["name"]: tag["description"] for tag in openapi["tags"]}
+    assert (
+        tag_descriptions["健康检查"]
+        == "用于探针、负载均衡和发布验证的服务状态接口。"
+    )
+
+    operation = openapi["paths"]["/health"]["get"]
+    assert operation["operationId"] == "get_health_status"
+    assert operation["tags"] == ["健康检查"]
+    assert operation["summary"] == "检查服务健康状态"
+    assert "容器探针" in operation["description"]
+    assert operation["responses"]["200"]["description"] == "服务处于健康状态。"
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/HealthResponse")
+    assert operation["responses"]["200"]["content"]["application/json"]["example"][
+        "data"
+    ]["status"] == "healthy"
+    assert (
+        operation["responses"]["500"]["description"]
+        == "服务内部异常，响应体仍遵循统一错误结构。"
+    )
