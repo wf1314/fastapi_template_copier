@@ -3,11 +3,11 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from {{ package_name }}.core.config import settings
-from {{ package_name }}.core.error_items import ErrorItem
 from {{ package_name }}.core.exception.error_codes import ErrorCode
 from {{ package_name }}.core.exception.exceptions import AppException
 from {{ package_name }}.core.responses import (
     ApiResponse,
+    ErrorItem,
     ErrorResponse,
     success_response,
 )

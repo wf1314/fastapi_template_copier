@@ -63,7 +63,7 @@ GZip 仅在客户端 `Accept-Encoding` 支持 gzip 且响应体达到 `GZIP_MIN_
 HTTP 响应统一使用 `code/message/data/errors` 结构。成功响应使用
 `{{ package_name }}.core.responses.success_response()`；分页列表使用
 `{{ package_name }}.core.responses.paginated_response()` 和 `PaginatedData[T]`。
-错误明细使用 `{{ package_name }}.core.error_items.ErrorItem`（`field/message/code`），业务错误可抛出
+错误明细使用 `{{ package_name }}.core.responses.ErrorItem`（`field/message/code`），业务错误可抛出
 `{{ package_name }}.core.exception.exceptions.AppException`。默认错误码来自
 `{{ package_name }}.core.exception.error_codes.ErrorCode`：`0` 表示成功，
 `100xxx` 为模板内置通用错误码，业务模块应扩展独立号段，不要直接复用 HTTP

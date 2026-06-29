@@ -10,7 +10,6 @@ from loguru import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from {{ package_name }}.core.config import settings
-from {{ package_name }}.core.error_items import ErrorItem
 from {{ package_name }}.core.exception.error_codes import (
     ErrorCode,
     default_error_code,
@@ -22,7 +21,7 @@ from {{ package_name }}.core.middleware.request_context import (
     get_request_id,
     get_trace_id,
 )
-from {{ package_name }}.core.responses import error_response_content
+from {{ package_name }}.core.responses import ErrorItem, error_response_content
 
 
 def _status_phrase(status_code: int) -> str:

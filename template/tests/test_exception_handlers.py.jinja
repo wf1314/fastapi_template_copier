@@ -6,13 +6,13 @@ from fastapi import HTTPException
 from pytest import CaptureFixture
 
 from {{ package_name }}.core.config import settings
-from {{ package_name }}.core.error_items import ErrorItem
 from {{ package_name }}.core.exception.error_codes import ErrorCode
 from {{ package_name }}.core.exception.exceptions import AppException
 from {{ package_name }}.core.middleware.request_context import (
     REQUEST_ID_HEADER,
     TRACE_ID_HEADER,
 )
+from {{ package_name }}.core.responses import ErrorItem
 from {{ package_name }}.main import create_app
 from tests.conftest import AsyncClientFactory
 

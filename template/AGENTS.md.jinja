@@ -43,7 +43,7 @@ make migrate                              # 应用迁移到 head
 - 配置统一通过 `{{ package_name }}.core.config.settings`（`pydantic-settings`，从环境变量和 `.env` 读取，`lru_cache` 缓存）；不要直接实例化 `Settings()`。
 - 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/`，路由与 schema 分文件，并在 `router.py` 的 `build_api_router()` 中注册。仅联调用的路由可像 `examples/` 一样用 `settings.DEBUG` 门控，默认不进生产路由。
 - 统一响应：所有接口返回 `ApiResponse`（`code`/`message`/`data`/`errors`），单对象成功用 `core.responses.success_response()`，分页列表用 `core.responses.paginated_response()` 和 `PaginatedData[T]`，错误响应遵循 `ErrorResponse`。
-- 错误明细使用 `core.error_items.ErrorItem`（`field`/`message`/`code`），不要传裸 `dict[str, Any]`。业务错误抛 `core.exception.exceptions.AppException`（携带 `status_code`、`code`、`errors`），由全局异常处理器统一兜底；默认错误码来自 `core.exception.error_codes.ErrorCode`。`0` 表示成功，`100xxx` 为模板内置通用错误码，业务模块使用独立号段（例如 `2xxxxx`/`3xxxxx`），不要直接复用 HTTP 状态码作为业务码。框架已处理 `AppException`、HTTP 异常、请求校验异常和未捕获异常，`DEBUG=false` 时不向客户端暴露内部错误。不要自行 `JSONResponse` 拼装错误体。
+- 错误明细使用 `core.responses.ErrorItem`（`field`/`message`/`code`），不要传裸 `dict[str, Any]`。业务错误抛 `core.exception.exceptions.AppException`（携带 `status_code`、`code`、`errors`），由全局异常处理器统一兜底；默认错误码来自 `core.exception.error_codes.ErrorCode`。`0` 表示成功，`100xxx` 为模板内置通用错误码，业务模块使用独立号段（例如 `2xxxxx`/`3xxxxx`），不要直接复用 HTTP 状态码作为业务码。框架已处理 `AppException`、HTTP 异常、请求校验异常和未捕获异常，`DEBUG=false` 时不向客户端暴露内部错误。不要自行 `JSONResponse` 拼装错误体。
 - 健康检查分层：`/livez` 只表达进程存活，`/readyz` 检查数据库等关键依赖。模板不注册 `/health` 兼容入口，容器、负载均衡和发布验证使用 `/readyz`。
 - 数据库会话用 `db.session.SessionDep`；该依赖异常时回滚，但请求结束不自动提交，写操作需显式 `await session.commit()`。
 - 新增 ORM 模型继承 `models.base.Base`（可混入 `TimestampMixin`），并在 `models/__init__.py` 导出，否则 Alembic 自动生成迁移无法收集到该表。

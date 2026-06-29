@@ -1,7 +1,7 @@
 from fastapi import status
 
-from {{ package_name }}.core.error_items import ErrorItem
 from {{ package_name }}.core.exception.error_codes import ErrorCode, default_error_code
+from {{ package_name }}.core.responses import ErrorItem
 
 
 class AppException(Exception):
