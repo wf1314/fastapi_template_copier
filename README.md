@@ -51,6 +51,47 @@ uvx copier copy gh:wf1314/fastapi_template_copier /path/to/new-project \
 - Dockerfile 与 `.dockerignore`
 - 面向生成项目的 `AGENTS.md`
 
+## 生成项目结构
+
+以默认参数（包目录 `app/`）为例，生成的项目结构如下：
+
+```
+new-project/
+├── app/                              # 导入包目录（package_name，默认 app/）
+│   ├── api/
+│   │   ├── health.py                 # /livez、/readyz 健康检查
+│   │   └── v1/
+│   │       ├── router.py             # v1 路由聚合
+│   │       └── examples/             # 示例资源模块（router.py + schema.py）
+│   ├── core/
+│   │   ├── config.py                 # Pydantic Settings 环境配置
+│   │   ├── exception/                # 异常、错误码、全局处理器
+│   │   ├── middleware/request_context.py  # 请求 ID / 链路 ID 中间件
+│   │   ├── logging.py                # Loguru 日志，接管标准库与 Uvicorn
+│   │   ├── request_params.py         # 通用分页、排序依赖
+│   │   ├── responses.py              # 统一响应封装（code/message/data/errors）
+│   │   └── security.py               # 认证主体与权限依赖扩展点
+│   ├── db/
+│   │   ├── session.py                # SQLAlchemy 异步会话、连接池
+│   │   └── transaction.py            # 显式事务 helper
+│   ├── models/base.py                # 空模型基类，留作扩展
+│   └── main.py                       # 应用工厂 create_app()
+├── alembic/                          # 迁移环境（不预置迁移版本）
+│   ├── env.py
+│   └── versions/
+├── tests/                            # 开箱即用的 pytest 测试
+├── main.py                           # `uv run python main.py` 启动入口
+├── pyproject.toml                    # uv、Ruff、mypy、pytest 配置
+├── Dockerfile
+├── Makefile
+├── .env.example
+└── AGENTS.md
+```
+
+`app/` 为默认包名；若在生成时指定其它 `package_name`，上述 `app/` 与
+`app.main:app` 会相应替换。新增资源接口推荐沿用 `api/v1/<resource>/` 下
+`router.py` + `schema.py` 的模块风格。
+
 ## 模板开发
 
 ```bash
