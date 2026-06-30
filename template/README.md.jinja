@@ -12,6 +12,18 @@
 - uv
 - Ruff、mypy、pytest、pre-commit
 
+## 项目结构
+
+- `{{ package_name }}/api/v1/<feature>/router.py`：HTTP 路由、依赖注入、响应封装。
+- `{{ package_name }}/api/v1/<feature>/schema.py`：当前 API 版本的请求与响应模型。
+- `{{ package_name }}/services/<feature>.py`：业务服务层，放流程编排、事务边界和跨模型协调。
+- `{{ package_name }}/models/`：SQLAlchemy ORM 模型。
+- `{{ package_name }}/db/`：数据库连接、会话和事务工具。
+
+路由层可以调用 service 层；service 层不要反向依赖 `api/v1/.../schema.py`，
+避免业务逻辑绑定具体 API 版本。多个入口共享的业务输入输出对象可单独抽出，
+但默认的接口请求/响应 schema 保持在 `api/v1/<feature>/schema.py`。
+
 ## 快速开始
 
 ```bash

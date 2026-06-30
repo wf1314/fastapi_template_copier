@@ -38,7 +38,8 @@ uvx copier copy gh:wf1314/fastapi_template_copier /path/to/new-project \
 
 - 默认使用 `app/` 作为 Python 导入包目录
 - FastAPI 应用工厂与 `/livez`、`/readyz` 健康检查
-- `api/v1/<resource>/router.py` 和 `schema.py` 风格的接口模块
+- `api/v1/<feature>/router.py` 和 `schema.py` 风格的接口模块
+- `services/<feature>.py` 风格的业务服务层
 - 统一响应封装（`code/message/data/errors`）、通用错误码与全局异常处理
 - 通用分页、排序请求参数依赖
 - Loguru 日志，接管标准库与 Uvicorn 日志，并预置请求 ID、链路 ID 和耗时日志
@@ -63,6 +64,8 @@ new-project/
 │   │   └── v1/
 │   │       ├── router.py             # v1 路由聚合
 │   │       └── examples/             # 示例资源模块（router.py + schema.py）
+│   ├── services/
+│   │   └── __init__.py               # 业务服务层包
 │   ├── core/
 │   │   ├── config.py                 # Pydantic Settings 环境配置
 │   │   ├── exception/                # 异常、错误码、全局处理器
@@ -89,8 +92,10 @@ new-project/
 ```
 
 `app/` 为默认包名；若在生成时指定其它 `package_name`，上述 `app/` 与
-`app.main:app` 会相应替换。新增资源接口推荐沿用 `api/v1/<resource>/` 下
-`router.py` + `schema.py` 的模块风格。
+`app.main:app` 会相应替换。新增接口推荐沿用 `api/v1/<feature>/` 下
+`router.py` + `schema.py` 的模块风格，业务流程、事务边界和跨模型协调放在
+`services/<feature>.py`。路由层可以调用 service 层；service 层不要反向依赖
+`api/v1/.../schema.py`，避免业务逻辑绑定具体 API 版本。
 
 ## 模板开发
 
