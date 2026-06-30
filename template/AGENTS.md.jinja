@@ -10,6 +10,7 @@ SQLAlchemy 2.x、Alembic、Pydantic Settings 和 Loguru。
 - `{{ package_name }}/api/v1/router.py`：`build_api_router()` 聚合 v1 路由，新特性在此 `include_router` 注册。
 - `{{ package_name }}/api/v1/<feature>/`：按业务划分的特性目录，含 `router.py`（路由）与 `schema.py`（Pydantic 请求/响应模型），结构参考 `examples/`。
 - `{{ package_name }}/services/`：业务服务层，按业务模块拆分流程编排、事务边界与跨模型协调，不依赖 FastAPI 路由和 API 版本 schema。
+- `{{ package_name }}/crud/`：数据库 CRUD 与查询封装，按业务模块拆分，供 service 层调用，不处理 HTTP schema、业务流程编排或数据库连接管理。
 - `{{ package_name }}/core/`：`config.py`（`Settings` 与缓存单例 `settings`）、`logging.py`（Loguru 初始化并接管标准库与 Uvicorn 日志）、`responses.py`（统一响应结构）、`exception/`（通用错误码、`AppException` 与全局异常处理器）、`middleware/`（请求上下文等自定义中间件）。
 - `{{ package_name }}/db/session.py`：异步引擎与请求级会话，提供 `SessionDep` 依赖。
 - `{{ package_name }}/models/base.py`：`Base` 声明式基类与 `TimestampMixin`（`id`、`created_at`、`updated_at`）；`__init__.py` 导出全部模型，供 Alembic 收集表元数据。
@@ -42,7 +43,7 @@ make migrate                              # 应用迁移到 head
 - 使用异步 FastAPI 和 SQLAlchemy 2.x 写法；模块、函数和变量用 `snake_case`，Schema 与 ORM 模型用 `PascalCase`。
 - mypy 使用 `strict = true` 并启用 `pydantic.mypy` 插件；所有函数必须标注参数与返回类型。ORM 模型使用 SQLAlchemy 2 的 `Mapped`/`mapped_column` 原生类型，不配置已弃用的 SQLAlchemy mypy 插件。
 - 配置统一通过 `{{ package_name }}.core.config.settings`（`pydantic-settings`，从环境变量和 `.env` 读取，`lru_cache` 缓存）；不要直接实例化 `Settings()`。
-- 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/`，路由与 schema 分文件，并在 `router.py` 的 `build_api_router()` 中注册。业务逻辑放在 `{{ package_name }}/services/<feature>.py`，由路由层调用；service 层不要依赖 `api/v1/.../schema.py`，避免绑定具体 API 版本。仅联调用的路由可像 `examples/` 一样用 `settings.DEBUG` 门控，默认不进生产路由。
+- 新功能按业务放在 `{{ package_name }}/api/v1/<feature>/`，路由与 schema 分文件，并在 `router.py` 的 `build_api_router()` 中注册。业务逻辑放在 `{{ package_name }}/services/<feature>.py`，由路由层调用；数据库增删改查和查询封装放在 `{{ package_name }}/crud/<feature>.py`，供 service 层调用。service 层不要依赖 `api/v1/.../schema.py`，避免绑定具体 API 版本。仅联调用的路由可像 `examples/` 一样用 `settings.DEBUG` 门控，默认不进生产路由。
 - 统一响应：所有接口返回 `ApiResponse`（`code`/`message`/`data`/`errors`），单对象成功用 `core.responses.success_response()`，分页列表用 `core.responses.paginated_response()` 和 `PaginatedData[T]`，错误响应遵循 `ErrorResponse`。
 - 错误明细使用 `core.responses.ErrorItem`（`field`/`message`/`code`），不要传裸 `dict[str, Any]`。业务错误抛 `core.exception.exceptions.AppException`（携带 `status_code`、`code`、`errors`），由全局异常处理器统一兜底；默认错误码来自 `core.exception.error_codes.ErrorCode`。`0` 表示成功，`100xxx` 为模板内置通用错误码，业务模块使用独立号段（例如 `2xxxxx`/`3xxxxx`），不要直接复用 HTTP 状态码作为业务码。框架已处理 `AppException`、HTTP 异常、请求校验异常和未捕获异常，`DEBUG=false` 时不向客户端暴露内部错误。不要自行 `JSONResponse` 拼装错误体。
 - 健康检查分层：`/livez` 只表达进程存活，`/readyz` 检查数据库等关键依赖。模板不注册 `/health` 兼容入口，容器、负载均衡和发布验证使用 `/readyz`。
