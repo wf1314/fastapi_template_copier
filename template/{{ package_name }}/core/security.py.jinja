@@ -1,0 +1,96 @@
+from collections.abc import Awaitable, Callable
+from typing import Annotated
+
+from fastapi import Depends, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+
+from {{ package_name }}.core.exception.error_codes import ErrorCode
+from {{ package_name }}.core.exception.exceptions import AppException
+from {{ package_name }}.core.responses import ErrorItem
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+class Principal(BaseModel):
+    """认证主体。
+
+    模板不绑定具体认证供应商。接入 JWT、OAuth2、网关鉴权或内部 SSO 时，
+    将验证结果映射为该模型即可。
+    """
+
+    subject: str = Field(description="调用方主体标识。")
+    scopes: set[str] = Field(default_factory=set, description="认证令牌作用域。")
+    permissions: set[str] = Field(
+        default_factory=set,
+        description="业务权限标识。",
+    )
+
+
+async def authenticate_bearer_token(token: str) -> Principal | None:
+    """Bearer Token 验证扩展点。
+
+    默认实现不信任任何外部令牌。项目接入认证后，在这里校验签名、
+    过期时间、签发方和权限声明，并返回 Principal。
+    """
+    _ = token
+    return None
+
+
+async def get_current_principal(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(bearer_scheme),
+    ],
+) -> Principal | None:
+    """返回当前认证主体；未认证或令牌无效时返回 None。"""
+    if credentials is None:
+        return None
+    return await authenticate_bearer_token(credentials.credentials)
+
+
+async def require_authenticated_principal(
+    principal: Annotated[Principal | None, Depends(get_current_principal)],
+) -> Principal:
+    """FastAPI 依赖：要求请求已认证。"""
+    if principal is None:
+        raise AppException(
+            "Authentication required",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code=ErrorCode.UNAUTHORIZED,
+        )
+    return principal
+
+
+def require_permissions(
+    *required_permissions: str,
+) -> Callable[..., Awaitable[Principal]]:
+    """FastAPI 依赖工厂：要求当前主体具备指定业务权限。"""
+    required = set(required_permissions)
+
+    async def dependency(
+        principal: Annotated[
+            Principal,
+            Depends(require_authenticated_principal),
+        ],
+    ) -> Principal:
+        missing = sorted(required - principal.permissions)
+        if missing:
+            raise AppException(
+                "Permission denied",
+                status_code=status.HTTP_403_FORBIDDEN,
+                code=ErrorCode.FORBIDDEN,
+                errors=[
+                    ErrorItem.model_validate(
+                        {
+                            "field": "permissions",
+                            "message": "Missing required permissions.",
+                            "code": "permission_denied",
+                            "missing": missing,
+                        }
+                    )
+                ],
+            )
+        return principal
+
+    return dependency

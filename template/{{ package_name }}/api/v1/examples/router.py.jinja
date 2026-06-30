@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, status
 
 from {{ package_name }}.api.v1.examples.schema import (
     ExampleErrorRequest,
@@ -10,6 +10,7 @@ from {{ package_name }}.api.v1.examples.schema import (
 )
 from {{ package_name }}.core.exception.error_codes import ErrorCode
 from {{ package_name }}.core.exception.exceptions import AppException
+from {{ package_name }}.core.request_params import ListQuery
 from {{ package_name }}.core.responses import (
     ApiResponse,
     ErrorItem,
@@ -70,16 +71,15 @@ async def example_success(
     ),
 )
 async def list_example_items(
-    page: int = Query(default=1, ge=1, description="页码，从 1 开始。"),
-    page_size: int = Query(default=2, ge=1, le=100, description="每页数量。"),
+    query: ListQuery,
 ) -> ApiResponse[PaginatedData[ExampleItemData]]:
     """返回统一分页列表响应的示例接口。"""
-    start = (page - 1) * page_size
-    end = start + page_size
+    start = query.offset
+    end = start + query.limit
     return paginated_response(
         EXAMPLE_ITEMS[start:end],
-        page=page,
-        page_size=page_size,
+        page=query.page,
+        page_size=query.page_size,
         total=len(EXAMPLE_ITEMS),
     )
 

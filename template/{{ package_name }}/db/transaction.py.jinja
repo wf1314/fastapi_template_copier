@@ -1,0 +1,26 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from {{ package_name }}.db import session as db_session
+
+
+@asynccontextmanager
+async def transaction(session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """显式事务边界：成功提交，异常回滚。"""
+    try:
+        yield session
+    except Exception:
+        await session.rollback()
+        raise
+    else:
+        await session.commit()
+
+
+@asynccontextmanager
+async def transactional_session() -> AsyncIterator[AsyncSession]:
+    """创建独立会话并包裹显式事务，适合后台任务或脚本复用。"""
+    async with db_session.async_session_maker() as session:
+        async with transaction(session):
+            yield session

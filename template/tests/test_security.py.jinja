@@ -1,0 +1,127 @@
+from typing import Annotated
+
+import pytest
+from fastapi import Depends
+from pytest import MonkeyPatch
+
+from {{ package_name }}.core import security
+from {{ package_name }}.core.exception.error_codes import ErrorCode
+from {{ package_name }}.core.security import (
+    Principal,
+    require_authenticated_principal,
+    require_permissions,
+)
+from {{ package_name }}.main import create_app
+from tests.conftest import AsyncClientFactory
+
+
+@pytest.mark.asyncio
+async def test_required_principal_returns_unified_401_response(
+    async_client_for_app: AsyncClientFactory,
+) -> None:
+    app = create_app()
+
+    @app.get("/protected")
+    async def protected(
+        principal: Annotated[
+            Principal,
+            Depends(require_authenticated_principal),
+        ],
+    ) -> dict[str, str]:
+        return {"subject": principal.subject}
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get("/protected")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": int(ErrorCode.UNAUTHORIZED),
+        "message": "Authentication required",
+        "data": None,
+        "errors": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_permission_dependency_allows_authenticated_principal(
+    async_client_for_app: AsyncClientFactory,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def authenticate_bearer_token(value: str) -> Principal | None:
+        if value == "valid-fixture":
+            return Principal(
+                subject="user-1",
+                permissions={"orders:read"},
+            )
+        return None
+
+    monkeypatch.setattr(
+        security,
+        "authenticate_bearer_token",
+        authenticate_bearer_token,
+    )
+    app = create_app()
+
+    @app.get("/orders")
+    async def list_orders(
+        principal: Annotated[
+            Principal,
+            Depends(require_permissions("orders:read")),
+        ],
+    ) -> dict[str, str]:
+        return {"subject": principal.subject}
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/orders",
+            headers={"Authorization": "Bearer valid-fixture"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"subject": "user-1"}
+
+
+@pytest.mark.asyncio
+async def test_permission_dependency_reports_missing_permissions(
+    async_client_for_app: AsyncClientFactory,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    async def authenticate_bearer_token(_value: str) -> Principal | None:
+        return Principal(subject="user-1")
+
+    monkeypatch.setattr(
+        security,
+        "authenticate_bearer_token",
+        authenticate_bearer_token,
+    )
+    app = create_app()
+
+    @app.get("/orders")
+    async def list_orders(
+        _principal: Annotated[
+            Principal,
+            Depends(require_permissions("orders:read")),
+        ],
+    ) -> dict[str, bool]:
+        return {"ok": True}
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/orders",
+            headers={"Authorization": "Bearer valid-fixture"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": int(ErrorCode.FORBIDDEN),
+        "message": "Permission denied",
+        "data": None,
+        "errors": [
+            {
+                "field": "permissions",
+                "message": "Missing required permissions.",
+                "code": "permission_denied",
+                "missing": ["orders:read"],
+            }
+        ],
+    }

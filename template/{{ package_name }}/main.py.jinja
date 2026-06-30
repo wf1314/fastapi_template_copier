@@ -61,9 +61,15 @@ def create_app() -> FastAPI:
             "所有业务接口默认使用统一响应结构："
             "`code`、`message`、`data`、`errors`。"
         ),
-        openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
-        docs_url=f"{settings.API_V1_PREFIX}/docs",
-        redoc_url=f"{settings.API_V1_PREFIX}/redoc",
+        openapi_url=(
+            f"{settings.API_V1_PREFIX}/openapi.json"
+            if settings.DOCS_ENABLED
+            else None
+        ),
+        docs_url=f"{settings.API_V1_PREFIX}/docs" if settings.DOCS_ENABLED else None,
+        redoc_url=(
+            f"{settings.API_V1_PREFIX}/redoc" if settings.DOCS_ENABLED else None
+        ),
         openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
     )

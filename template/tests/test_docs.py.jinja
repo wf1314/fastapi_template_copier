@@ -1,0 +1,39 @@
+from collections.abc import Iterator
+
+import pytest
+
+from {{ package_name }}.core.config import settings
+from {{ package_name }}.core.exception.error_codes import ErrorCode
+from tests.conftest import AsyncClientFactory
+
+
+@pytest.fixture
+def docs_settings() -> Iterator[None]:
+    original = settings.DOCS_ENABLED
+    try:
+        yield
+    finally:
+        settings.DOCS_ENABLED = original
+
+
+@pytest.mark.asyncio
+async def test_api_docs_can_be_disabled(
+    async_client_for_app: AsyncClientFactory,
+    docs_settings: None,
+) -> None:
+    settings.DOCS_ENABLED = False
+
+    async with async_client_for_app(None, "http://test", True) as client:
+        openapi = await client.get("/api/v1/openapi.json")
+        swagger = await client.get("/api/v1/docs")
+        redoc = await client.get("/api/v1/redoc")
+
+    assert openapi.status_code == 404
+    assert openapi.json() == {
+        "code": int(ErrorCode.NOT_FOUND),
+        "message": "Not Found",
+        "data": None,
+        "errors": None,
+    }
+    assert swagger.status_code == 404
+    assert redoc.status_code == 404

@@ -40,10 +40,13 @@ uvx copier copy gh:wf1314/fastapi_template_copier /path/to/new-project \
 - FastAPI 应用工厂与 `/livez`、`/readyz` 健康检查
 - `api/v1/<resource>/router.py` 和 `schema.py` 风格的接口模块
 - 统一响应封装（`code/message/data/errors`）、通用错误码与全局异常处理
+- 通用分页、排序请求参数依赖
 - Loguru 日志，接管标准库与 Uvicorn 日志，并预置请求 ID、链路 ID 和耗时日志
 - Pydantic Settings 环境配置
-- SQLAlchemy 异步会话与空模型基类
+- SQLAlchemy 异步会话、PostgreSQL/MySQL URL 兼容、连接池参数、显式事务 helper 与空模型基类
 - Alembic 迁移环境，不预置迁移版本
+- 不绑定供应商的认证主体和权限依赖扩展点
+- 可关闭的 Swagger、ReDoc 和 OpenAPI JSON
 - `uv`、Ruff、mypy、pytest、pre-commit
 - Dockerfile 与 `.dockerignore`
 - 面向生成项目的 `AGENTS.md`

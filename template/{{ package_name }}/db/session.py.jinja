@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from sqlalchemy import text
@@ -11,10 +12,31 @@ from sqlalchemy.ext.asyncio import (
 
 from {{ package_name }}.core.config import settings
 
-engine = create_async_engine(
-    settings.async_database_url,
-    echo=settings.DEBUG,
-)
+
+def _is_sqlite_database(url: str) -> bool:
+    """判断连接串是否为 SQLite，避免传入不兼容的连接池参数。"""
+    return url.startswith("sqlite")
+
+
+def _engine_options() -> dict[str, Any]:
+    """根据数据库类型生成 SQLAlchemy 异步引擎参数。"""
+    options: dict[str, Any] = {"echo": settings.DEBUG}
+    if _is_sqlite_database(settings.async_database_url):
+        return options
+
+    options.update(
+        {
+            "pool_pre_ping": settings.DATABASE_POOL_PRE_PING,
+            "pool_size": settings.DATABASE_POOL_SIZE,
+            "max_overflow": settings.DATABASE_MAX_OVERFLOW,
+            "pool_timeout": settings.DATABASE_POOL_TIMEOUT,
+            "pool_recycle": settings.DATABASE_POOL_RECYCLE,
+        }
+    )
+    return options
+
+
+engine = create_async_engine(settings.async_database_url, **_engine_options())
 async_session_maker = async_sessionmaker(
     engine,
     expire_on_commit=False,
@@ -27,10 +49,17 @@ async def dispose_engine() -> None:
     await engine.dispose()
 
 
-async def check_database_ready() -> None:
-    """执行轻量数据库探测，供 readiness 检查使用。"""
+async def _execute_database_ready_query() -> None:
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
+
+
+async def check_database_ready() -> None:
+    """执行轻量数据库探测，供 readiness 检查使用。"""
+    await asyncio.wait_for(
+        _execute_database_ready_query(),
+        timeout=settings.DATABASE_READY_TIMEOUT,
+    )
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

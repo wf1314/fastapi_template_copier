@@ -1,0 +1,107 @@
+from pytest import MonkeyPatch
+
+from {{ package_name }}.core.config import Settings, settings
+from {{ package_name }}.db import session as db_session
+
+
+def test_sqlite_engine_options_skip_pool_settings(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "DATABASE_URL", "sqlite:///./test.db")
+    monkeypatch.setattr(settings, "DEBUG", True)
+
+    assert db_session._engine_options() == {"echo": True}
+
+
+def test_postgres_engine_options_include_pool_settings(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://user:pass@host/db")
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings, "DATABASE_POOL_PRE_PING", True)
+    monkeypatch.setattr(settings, "DATABASE_POOL_SIZE", 7)
+    monkeypatch.setattr(settings, "DATABASE_MAX_OVERFLOW", 3)
+    monkeypatch.setattr(settings, "DATABASE_POOL_TIMEOUT", 11)
+    monkeypatch.setattr(settings, "DATABASE_POOL_RECYCLE", 600)
+
+    assert db_session._engine_options() == {
+        "echo": False,
+        "pool_pre_ping": True,
+        "pool_size": 7,
+        "max_overflow": 3,
+        "pool_timeout": 11,
+        "pool_recycle": 600,
+    }
+
+
+def test_mysql_engine_options_include_pool_settings(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "DATABASE_URL",
+        "mysql://user:pass@localhost:3306/app?charset=utf8mb4",
+    )
+    monkeypatch.setattr(settings, "DEBUG", False)
+
+    options = db_session._engine_options()
+
+    assert options["echo"] is False
+    assert options["pool_pre_ping"] == settings.DATABASE_POOL_PRE_PING
+    assert options["pool_size"] == settings.DATABASE_POOL_SIZE
+    assert options["max_overflow"] == settings.DATABASE_MAX_OVERFLOW
+    assert options["pool_timeout"] == settings.DATABASE_POOL_TIMEOUT
+    assert options["pool_recycle"] == settings.DATABASE_POOL_RECYCLE
+
+
+def test_mysql_database_url_converts_to_async_and_sync_drivers() -> None:
+    config = Settings.model_validate(
+        {
+            "DATABASE_URL": (
+                "mysql://user:pass@localhost:3306/app?charset=utf8mb4"
+            )
+        }
+    )
+
+    assert (
+        config.async_database_url
+        == "mysql+asyncmy://user:pass@localhost:3306/app?charset=utf8mb4"
+    )
+    assert (
+        config.sync_database_url
+        == "mysql+pymysql://user:pass@localhost:3306/app?charset=utf8mb4"
+    )
+
+
+def test_mysql_async_url_converts_to_sync_migration_driver() -> None:
+    config = Settings.model_validate(
+        {
+            "DATABASE_URL": (
+                "mysql+asyncmy://user:pass@localhost:3306/app?charset=utf8mb4"
+            )
+        }
+    )
+
+    assert (
+        config.async_database_url
+        == "mysql+asyncmy://user:pass@localhost:3306/app?charset=utf8mb4"
+    )
+    assert (
+        config.sync_database_url
+        == "mysql+pymysql://user:pass@localhost:3306/app?charset=utf8mb4"
+    )
+
+
+def test_mysql_sync_url_converts_to_async_runtime_driver() -> None:
+    config = Settings.model_validate(
+        {
+            "DATABASE_URL": (
+                "mysql+pymysql://user:pass@localhost:3306/app?charset=utf8mb4"
+            )
+        }
+    )
+
+    assert (
+        config.async_database_url
+        == "mysql+asyncmy://user:pass@localhost:3306/app?charset=utf8mb4"
+    )
+    assert (
+        config.sync_database_url
+        == "mysql+pymysql://user:pass@localhost:3306/app?charset=utf8mb4"
+    )

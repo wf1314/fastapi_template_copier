@@ -1,0 +1,126 @@
+import pytest
+from fastapi import FastAPI
+from pydantic import ValidationError
+
+from {{ package_name }}.core.request_params import (
+    ListQuery,
+    ListQueryParams,
+    PaginationParams,
+    PaginationQuery,
+    SortParams,
+)
+from tests.conftest import AsyncClientFactory
+
+
+def test_pagination_params_expose_limit_and_offset() -> None:
+    pagination = PaginationParams(page=3, page_size=25)
+
+    assert pagination.offset == 50
+    assert pagination.limit == 25
+
+
+def test_list_query_params_combine_pagination_and_sort() -> None:
+    query = ListQueryParams(page=2, page_size=10, sort_by="created_at")
+
+    assert query.offset == 10
+    assert query.limit == 10
+    assert query.sort_by == "created_at"
+    assert query.sort_order == "asc"
+
+
+def test_sort_params_validate_direction() -> None:
+    assert SortParams(sort_by="created_at", sort_order="desc").sort_order == "desc"
+
+    with pytest.raises(ValidationError):
+        SortParams.model_validate({"sort_by": "created_at", "sort_order": "up"})
+
+
+@pytest.mark.asyncio
+async def test_pagination_query_model_parses_query_params(
+    async_client_for_app: AsyncClientFactory,
+) -> None:
+    app = FastAPI()
+
+    @app.get("/pagination")
+    async def pagination_options(
+        pagination: PaginationQuery,
+    ) -> dict[str, object]:
+        return {
+            "page": pagination.page,
+            "page_size": pagination.page_size,
+            "offset": pagination.offset,
+            "limit": pagination.limit,
+        }
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get("/pagination", params={"page": 2, "page_size": 5})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page": 2,
+        "page_size": 5,
+        "offset": 5,
+        "limit": 5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_query_model_parses_pagination_and_sort_params(
+    async_client_for_app: AsyncClientFactory,
+) -> None:
+    app = FastAPI()
+
+    @app.get("/query-options")
+    async def query_options(
+        query: ListQuery,
+    ) -> dict[str, object]:
+        return {
+            "page": query.page,
+            "page_size": query.page_size,
+            "offset": query.offset,
+            "limit": query.limit,
+            "sort_by": query.sort_by,
+            "sort_order": query.sort_order,
+        }
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/query-options",
+            params={
+                "page": 2,
+                "page_size": 5,
+                "sort_by": "created_at",
+                "sort_order": "desc",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "page": 2,
+        "page_size": 5,
+        "offset": 5,
+        "limit": 5,
+        "sort_by": "created_at",
+        "sort_order": "desc",
+    }
+
+
+@pytest.mark.asyncio
+async def test_query_model_rejects_invalid_sort_field(
+    async_client_for_app: AsyncClientFactory,
+) -> None:
+    app = FastAPI()
+
+    @app.get("/query-options")
+    async def query_options(
+        _query: ListQuery,
+    ) -> dict[str, bool]:
+        return {"ok": True}
+
+    async with async_client_for_app(app, "http://test", True) as client:
+        response = await client.get(
+            "/query-options",
+            params={"sort_by": "created-at"},
+        )
+
+    assert response.status_code == 422

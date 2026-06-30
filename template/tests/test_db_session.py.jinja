@@ -1,11 +1,15 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from types import TracebackType
 from typing import cast
 
 import pytest
 from pytest import MonkeyPatch
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from {{ package_name }}.core.config import settings
 from {{ package_name }}.db import session as db_session
+from {{ package_name }}.db.transaction import transaction
 
 
 class FakeSession:
@@ -35,6 +39,25 @@ class FakeSessionContext:
         traceback: TracebackType | None,
     ) -> None:
         self.session.close_count += 1
+
+
+class HangingConnectionContext:
+    async def __aenter__(self) -> object:
+        await asyncio.sleep(60)
+        return object()
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
+
+
+class HangingEngine:
+    def connect(self) -> HangingConnectionContext:
+        return HangingConnectionContext()
 
 
 @pytest.mark.asyncio
@@ -81,3 +104,37 @@ async def test_get_session_rolls_back_on_exception(
     assert fake_session.commit_count == 0
     assert fake_session.rollback_count == 1
     assert fake_session.close_count == 1
+
+
+@pytest.mark.asyncio
+async def test_transaction_commits_on_success() -> None:
+    fake_session = FakeSession()
+
+    async with transaction(cast(AsyncSession, fake_session)) as yielded:
+        assert id(yielded) == id(fake_session)
+
+    assert fake_session.commit_count == 1
+    assert fake_session.rollback_count == 0
+
+
+@pytest.mark.asyncio
+async def test_check_database_ready_times_out_while_waiting_for_connection(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(db_session, "engine", HangingEngine())
+    monkeypatch.setattr(settings, "DATABASE_READY_TIMEOUT", 0.01)
+
+    with pytest.raises(TimeoutError):
+        await db_session.check_database_ready()
+
+
+@pytest.mark.asyncio
+async def test_transaction_rolls_back_on_exception() -> None:
+    fake_session = FakeSession()
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        async with transaction(cast(AsyncSession, fake_session)):
+            raise RuntimeError("write failed")
+
+    assert fake_session.commit_count == 0
+    assert fake_session.rollback_count == 1

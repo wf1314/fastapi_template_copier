@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,11 +30,18 @@ class Settings(BaseSettings):
     LOG_FILE_COMPRESSION: str = "gz"
 
     API_V1_PREFIX: str = "/api/v1"
+    DOCS_ENABLED: bool = True
     SERVER_HOST: str = "0.0.0.0"  # noqa: S104
     SERVER_PORT: int = {{ server_port }}
     SERVER_RELOAD: bool = False
 
     DATABASE_URL: str = "sqlite:///./app.db"
+    DATABASE_POOL_PRE_PING: bool = True
+    DATABASE_POOL_SIZE: int = Field(default=5, ge=1)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=1)
+    DATABASE_POOL_RECYCLE: int = Field(default=1800, ge=-1)
+    DATABASE_READY_TIMEOUT: float = Field(default=5.0, gt=0)
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
     GZIP_ENABLED: bool = True
     GZIP_MIN_SIZE: int = 1000
@@ -47,6 +55,14 @@ class Settings(BaseSettings):
             return self.DATABASE_URL
         if self.DATABASE_URL.startswith("sqlite://"):
             return self.DATABASE_URL.replace("sqlite://", "sqlite+aiosqlite://", 1)
+        if self.DATABASE_URL.startswith("mysql+asyncmy://"):
+            return self.DATABASE_URL
+        if self.DATABASE_URL.startswith("mysql+pymysql://"):
+            return self.DATABASE_URL.replace("mysql+pymysql://", "mysql+asyncmy://", 1)
+        if self.DATABASE_URL.startswith("mysql+mysqldb://"):
+            return self.DATABASE_URL.replace("mysql+mysqldb://", "mysql+asyncmy://", 1)
+        if self.DATABASE_URL.startswith("mysql://"):
+            return self.DATABASE_URL.replace("mysql://", "mysql+asyncmy://", 1)
         if self.DATABASE_URL.startswith("postgres://"):
             return self.DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
         if self.DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -64,6 +80,14 @@ class Settings(BaseSettings):
         """将数据库连接串转换为 Alembic 可用的同步驱动格式。"""
         if self.DATABASE_URL.startswith("sqlite+aiosqlite://"):
             return self.DATABASE_URL.replace("sqlite+aiosqlite://", "sqlite://", 1)
+        if self.DATABASE_URL.startswith("mysql+asyncmy://"):
+            return self.DATABASE_URL.replace("mysql+asyncmy://", "mysql+pymysql://", 1)
+        if self.DATABASE_URL.startswith("mysql+pymysql://"):
+            return self.DATABASE_URL
+        if self.DATABASE_URL.startswith("mysql+mysqldb://"):
+            return self.DATABASE_URL.replace("mysql+mysqldb://", "mysql+pymysql://", 1)
+        if self.DATABASE_URL.startswith("mysql://"):
+            return self.DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
         if self.DATABASE_URL.startswith("postgres://"):
             return self.DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
         if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
